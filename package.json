@@ -1,0 +1,886 @@
+{
+	"name": "file-worksets",
+	"displayName": "File Worksets",
+	"description": "Hand-pick the files that matter for a task, save them as named worksets, and browse them in a focused Explorer-like view.",
+	"version": "0.1.0",
+	"publisher": "local",
+	"private": true,
+	"license": "UNLICENSED",
+	"type": "module",
+	"engines": {
+		"vscode": "^1.100.0"
+	},
+	"categories": [
+		"Other"
+	],
+	"keywords": [
+		"workset",
+		"working set",
+		"files",
+		"explorer",
+		"task"
+	],
+	"main": "./dist/extension.cjs",
+	"activationEvents": [
+		"onStartupFinished"
+	],
+	"contributes": {
+		"viewsContainers": {
+			"activitybar": [
+				{
+					"id": "fileWorksets",
+					"title": "File Worksets",
+					"icon": "resources/worksets.svg"
+				}
+			]
+		},
+		"views": {
+			"fileWorksets": [
+				{
+					"id": "fileWorksets.files",
+					"name": "Workset Files",
+					"icon": "resources/worksets.svg",
+					"contextualTitle": "File Worksets"
+				},
+				{
+					"id": "fileWorksets.list",
+					"name": "File Worksets",
+					"icon": "resources/worksets.svg",
+					"contextualTitle": "File Worksets"
+				}
+			]
+		},
+		"viewsWelcome": [
+			{
+				"view": "fileWorksets.files",
+				"contents": "\u200b",
+				"when": "!fileWorksets.filesLoaded"
+			},
+			{
+				"view": "fileWorksets.files",
+				"contents": "Open a folder to start using worksets.\n[Open Folder](command:workbench.action.files.openFolder)",
+				"when": "fileWorksets.filesLoaded && workspaceFolderCount == 0"
+			},
+			{
+				"view": "fileWorksets.files",
+				"contents": "No workset is active. Files aren't added to any workset automatically. Adding a file creates a new workset.\n[New Workset](command:fileWorksets.createWorkset)\n[Switch/New Workset](command:fileWorksets.switchWorkset)",
+				"when": "fileWorksets.filesLoaded && workspaceFolderCount > 0 && !fileWorksets.hasActiveWorkset"
+			},
+			{
+				"view": "fileWorksets.files",
+				"contents": "This workset is empty. Drag files or folders here from the Explorer, or right-click them and choose \"Add to Active Workset\".\n[Add Active Editor](command:fileWorksets.addActiveEditor)\n[Add All Open Editors](command:fileWorksets.addOpenEditors)",
+				"when": "fileWorksets.filesLoaded && workspaceFolderCount > 0 && fileWorksets.hasActiveWorkset"
+			},
+			{
+				"view": "fileWorksets.list",
+				"contents": "\u200b",
+				"when": "!fileWorksets.listLoaded"
+			},
+			{
+				"view": "fileWorksets.list",
+				"contents": "Group the files you need for a task into a workset. Adding a file creates one automatically.\n[New Workset](command:fileWorksets.createWorkset)",
+				"when": "fileWorksets.listLoaded && workspaceFolderCount > 0"
+			}
+		],
+		"commands": [
+			{
+				"command": "fileWorksets.createWorkset",
+				"title": "New Workset",
+				"category": "File Worksets",
+				"icon": "$(add)"
+			},
+			{
+				"command": "fileWorksets.switchWorkset",
+				"title": "Switch/New Workset...",
+				"category": "File Worksets",
+				"icon": "$(arrow-swap)"
+			},
+			{
+				"command": "fileWorksets.activateWorkset",
+				"title": "Activate Workset",
+				"category": "File Worksets",
+				"icon": "$(check)"
+			},
+			{
+				"command": "fileWorksets.deactivateWorkset",
+				"title": "Deactivate Workset",
+				"category": "File Worksets",
+				"icon": "$(circle-slash)"
+			},
+			{
+				"command": "fileWorksets.renameWorkset",
+				"title": "Rename Workset...",
+				"category": "File Worksets",
+				"icon": "$(edit)"
+			},
+			{
+				"command": "fileWorksets.duplicateWorkset",
+				"title": "Duplicate Workset...",
+				"category": "File Worksets"
+			},
+			{
+				"command": "fileWorksets.deleteWorkset",
+				"title": "Delete Workset...",
+				"category": "File Worksets"
+			},
+			{
+				"command": "fileWorksets.sortWorksets",
+				"title": "Sort Worksets By...",
+				"category": "File Worksets",
+				"icon": "$(list-ordered)"
+			},
+			{
+				"command": "fileWorksets.refresh",
+				"title": "Refresh",
+				"category": "File Worksets",
+				"icon": "$(refresh)"
+			},
+			{
+				"command": "fileWorksets.setAutoAdd",
+				"title": "Set Auto-Add Mode...",
+				"category": "File Worksets"
+			},
+			{
+				"command": "fileWorksets.autoAdd.off",
+				"title": "Auto-Add: Off",
+				"category": "File Worksets",
+				"icon": "$(circle-slash)"
+			},
+			{
+				"command": "fileWorksets.autoAdd.opened",
+				"title": "Auto-Add: Opened Files",
+				"category": "File Worksets",
+				"icon": "$(eye)"
+			},
+			{
+				"command": "fileWorksets.autoAdd.edited",
+				"title": "Auto-Add: Edited Files",
+				"category": "File Worksets",
+				"icon": "$(edit)"
+			},
+			{
+				"command": "fileWorksets.addToActiveWorkset",
+				"title": "Add to Active Workset",
+				"category": "File Worksets"
+			},
+			{
+				"command": "fileWorksets.addToWorkset",
+				"title": "Add to Workset...",
+				"category": "File Worksets"
+			},
+			{
+				"command": "fileWorksets.addActiveEditor",
+				"title": "Add Active Editor to Workset",
+				"category": "File Worksets",
+				"icon": "$(add)"
+			},
+			{
+				"command": "fileWorksets.addOpenEditors",
+				"title": "Add All Open Editors to Workset",
+				"category": "File Worksets"
+			},
+			{
+				"command": "fileWorksets.removeActiveEditor",
+				"title": "Remove Active Editor from Workset",
+				"category": "File Worksets"
+			},
+			{
+				"command": "fileWorksets.removeFromWorkset",
+				"title": "Remove from Workset",
+				"category": "File Worksets",
+				"icon": "$(close)"
+			},
+			{
+				"command": "fileWorksets.removeMissing",
+				"title": "Remove Missing Files from Workset",
+				"category": "File Worksets"
+			},
+			{
+				"command": "fileWorksets.copyToWorkset",
+				"title": "Copy to Workset...",
+				"category": "File Worksets"
+			},
+			{
+				"command": "fileWorksets.moveToWorkset",
+				"title": "Move to Workset...",
+				"category": "File Worksets"
+			},
+			{
+				"command": "fileWorksets.openToSide",
+				"title": "Open to the Side",
+				"category": "File Worksets"
+			},
+			{
+				"command": "fileWorksets.revealInExplorer",
+				"title": "Reveal in Explorer View",
+				"category": "File Worksets"
+			},
+			{
+				"command": "fileWorksets.copyPath",
+				"title": "Copy Path",
+				"category": "File Worksets"
+			},
+			{
+				"command": "fileWorksets.copyRelativePath",
+				"title": "Copy Relative Path",
+				"category": "File Worksets"
+			},
+			{
+				"command": "fileWorksets.newFile",
+				"title": "New File...",
+				"category": "File Worksets"
+			},
+			{
+				"command": "fileWorksets.newFolder",
+				"title": "New Folder...",
+				"category": "File Worksets"
+			},
+			{
+				"command": "fileWorksets.openWith",
+				"title": "Open With...",
+				"category": "File Worksets"
+			},
+			{
+				"command": "fileWorksets.revealFileInOS.windows",
+				"title": "Reveal in File Explorer",
+				"category": "File Worksets"
+			},
+			{
+				"command": "fileWorksets.revealFileInOS.mac",
+				"title": "Reveal in Finder",
+				"category": "File Worksets"
+			},
+			{
+				"command": "fileWorksets.revealFileInOS.linux",
+				"title": "Open Containing Folder",
+				"category": "File Worksets"
+			},
+			{
+				"command": "fileWorksets.openInIntegratedTerminal",
+				"title": "Open in Integrated Terminal",
+				"category": "File Worksets"
+			},
+			{
+				"command": "fileWorksets.selectForCompare",
+				"title": "Select for Compare",
+				"category": "File Worksets"
+			},
+			{
+				"command": "fileWorksets.compareWithSelected",
+				"title": "Compare with Selected",
+				"category": "File Worksets"
+			},
+			{
+				"command": "fileWorksets.compareSelected",
+				"title": "Compare Selected",
+				"category": "File Worksets"
+			},
+			{
+				"command": "fileWorksets.findInFolder",
+				"title": "Find in Folder...",
+				"category": "File Worksets"
+			},
+			{
+				"command": "fileWorksets.renameFile",
+				"title": "Rename...",
+				"category": "File Worksets"
+			},
+			{
+				"command": "fileWorksets.deleteFile",
+				"title": "Delete",
+				"category": "File Worksets"
+			}
+		],
+		"menus": {
+			"commandPalette": [
+				{
+					"command": "fileWorksets.deactivateWorkset",
+					"when": "fileWorksets.hasActiveWorkset"
+				},
+				{
+					"command": "fileWorksets.autoAdd.off",
+					"when": "false"
+				},
+				{
+					"command": "fileWorksets.autoAdd.opened",
+					"when": "false"
+				},
+				{
+					"command": "fileWorksets.autoAdd.edited",
+					"when": "false"
+				},
+				{
+					"command": "fileWorksets.newFile",
+					"when": "false"
+				},
+				{
+					"command": "fileWorksets.newFolder",
+					"when": "false"
+				},
+				{
+					"command": "fileWorksets.openWith",
+					"when": "false"
+				},
+				{
+					"command": "fileWorksets.revealFileInOS.windows",
+					"when": "false"
+				},
+				{
+					"command": "fileWorksets.revealFileInOS.mac",
+					"when": "false"
+				},
+				{
+					"command": "fileWorksets.revealFileInOS.linux",
+					"when": "false"
+				},
+				{
+					"command": "fileWorksets.openInIntegratedTerminal",
+					"when": "false"
+				},
+				{
+					"command": "fileWorksets.selectForCompare",
+					"when": "false"
+				},
+				{
+					"command": "fileWorksets.compareWithSelected",
+					"when": "false"
+				},
+				{
+					"command": "fileWorksets.compareSelected",
+					"when": "false"
+				},
+				{
+					"command": "fileWorksets.findInFolder",
+					"when": "false"
+				},
+				{
+					"command": "fileWorksets.renameFile",
+					"when": "false"
+				},
+				{
+					"command": "fileWorksets.deleteFile",
+					"when": "false"
+				},
+				{
+					"command": "fileWorksets.removeFromWorkset",
+					"when": "false"
+				},
+				{
+					"command": "fileWorksets.copyToWorkset",
+					"when": "false"
+				},
+				{
+					"command": "fileWorksets.moveToWorkset",
+					"when": "false"
+				},
+				{
+					"command": "fileWorksets.openToSide",
+					"when": "false"
+				},
+				{
+					"command": "fileWorksets.revealInExplorer",
+					"when": "false"
+				},
+				{
+					"command": "fileWorksets.copyPath",
+					"when": "false"
+				},
+				{
+					"command": "fileWorksets.copyRelativePath",
+					"when": "false"
+				},
+				{
+					"command": "fileWorksets.activateWorkset",
+					"when": "false"
+				},
+				{
+					"command": "fileWorksets.addToActiveWorkset",
+					"when": "false"
+				},
+				{
+					"command": "fileWorksets.addToWorkset",
+					"when": "false"
+				}
+			],
+			"explorer/context": [
+				{
+					"command": "fileWorksets.addToActiveWorkset",
+					"when": "!explorerResourceIsRoot",
+					"group": "fileWorksets@1"
+				},
+				{
+					"command": "fileWorksets.addToWorkset",
+					"when": "!explorerResourceIsRoot",
+					"group": "fileWorksets@2"
+				}
+			],
+			"editor/title/context": [
+				{
+					"command": "fileWorksets.addToActiveWorkset",
+					"when": "isFileSystemResource",
+					"group": "fileWorksets@1"
+				},
+				{
+					"command": "fileWorksets.addToWorkset",
+					"when": "isFileSystemResource",
+					"group": "fileWorksets@2"
+				}
+			],
+			"view/title": [
+				{
+					"command": "fileWorksets.addActiveEditor",
+					"when": "view == fileWorksets.files",
+					"group": "navigation@1"
+				},
+				{
+					"command": "fileWorksets.autoAdd.off",
+					"when": "view == fileWorksets.files && fileWorksets.autoAdd == off",
+					"group": "navigation@2"
+				},
+				{
+					"command": "fileWorksets.autoAdd.opened",
+					"when": "view == fileWorksets.files && fileWorksets.autoAdd == opened",
+					"group": "navigation@2"
+				},
+				{
+					"command": "fileWorksets.autoAdd.edited",
+					"when": "view == fileWorksets.files && fileWorksets.autoAdd != off && fileWorksets.autoAdd != opened",
+					"group": "navigation@2"
+				},
+				{
+					"command": "fileWorksets.switchWorkset",
+					"when": "view == fileWorksets.files",
+					"group": "navigation@3"
+				},
+				{
+					"command": "fileWorksets.refresh",
+					"when": "view == fileWorksets.files",
+					"group": "9_refresh@1"
+				},
+				{
+					"command": "fileWorksets.addOpenEditors",
+					"when": "view == fileWorksets.files",
+					"group": "1_add@1"
+				},
+				{
+					"command": "fileWorksets.removeActiveEditor",
+					"when": "view == fileWorksets.files",
+					"group": "1_add@2"
+				},
+				{
+					"command": "fileWorksets.removeMissing",
+					"when": "view == fileWorksets.files",
+					"group": "2_cleanup@1"
+				},
+				{
+					"command": "fileWorksets.deactivateWorkset",
+					"when": "view == fileWorksets.files && fileWorksets.hasActiveWorkset",
+					"group": "3_workset@1"
+				},
+				{
+					"command": "fileWorksets.renameWorkset",
+					"when": "view == fileWorksets.files && fileWorksets.hasActiveWorkset",
+					"group": "3_workset@0"
+				},
+				{
+					"command": "fileWorksets.createWorkset",
+					"when": "view == fileWorksets.list",
+					"group": "navigation@1"
+				},
+				{
+					"command": "fileWorksets.sortWorksets",
+					"when": "view == fileWorksets.list",
+					"group": "navigation@2"
+				},
+				{
+					"command": "fileWorksets.refresh",
+					"when": "view == fileWorksets.list",
+					"group": "9_refresh@1"
+				}
+			],
+			"view/item/context": [
+				{
+					"command": "fileWorksets.activateWorkset",
+					"when": "view == fileWorksets.list && viewItem == workset",
+					"group": "inline"
+				},
+				{
+					"command": "fileWorksets.deactivateWorkset",
+					"when": "view == fileWorksets.list && viewItem == workset.active",
+					"group": "inline"
+				},
+				{
+					"command": "fileWorksets.renameWorkset",
+					"when": "view == fileWorksets.list && viewItem =~ /^workset/",
+					"group": "inline@0"
+				},
+				{
+					"command": "fileWorksets.activateWorkset",
+					"when": "view == fileWorksets.list && viewItem == workset",
+					"group": "1_workset@1"
+				},
+				{
+					"command": "fileWorksets.deactivateWorkset",
+					"when": "view == fileWorksets.list && viewItem == workset.active",
+					"group": "1_workset@1"
+				},
+				{
+					"command": "fileWorksets.renameWorkset",
+					"when": "view == fileWorksets.list && viewItem =~ /^workset/",
+					"group": "1_workset@2"
+				},
+				{
+					"command": "fileWorksets.duplicateWorkset",
+					"when": "view == fileWorksets.list && viewItem =~ /^workset/",
+					"group": "1_workset@3"
+				},
+				{
+					"command": "fileWorksets.removeMissing",
+					"when": "view == fileWorksets.list && viewItem =~ /^workset/",
+					"group": "2_cleanup@1"
+				},
+				{
+					"command": "fileWorksets.deleteWorkset",
+					"when": "view == fileWorksets.list && viewItem =~ /^workset/",
+					"group": "3_delete@1"
+				},
+				{
+					"command": "fileWorksets.newFile",
+					"when": "view =~ /^fileWorksets\\./ && viewItem =~ /^(root|folder|implicit|dynamicFolder)$/",
+					"group": "navigation@1"
+				},
+				{
+					"command": "fileWorksets.newFolder",
+					"when": "view =~ /^fileWorksets\\./ && viewItem =~ /^(root|folder|implicit|dynamicFolder)$/",
+					"group": "navigation@2"
+				},
+				{
+					"command": "fileWorksets.openToSide",
+					"when": "view =~ /^fileWorksets\\./ && viewItem =~ /^(file|dynamicFile)$/",
+					"group": "navigation@10"
+				},
+				{
+					"command": "fileWorksets.openWith",
+					"when": "view =~ /^fileWorksets\\./ && viewItem =~ /^(file|dynamicFile)$/",
+					"group": "navigation@20"
+				},
+				{
+					"command": "fileWorksets.revealFileInOS.windows",
+					"when": "view =~ /^fileWorksets\\./ && viewItem =~ /^(root|file|folder|implicit|dynamicFile|dynamicFolder)$/ && isWindows && !isWeb",
+					"group": "navigation@30"
+				},
+				{
+					"command": "fileWorksets.revealFileInOS.mac",
+					"when": "view =~ /^fileWorksets\\./ && viewItem =~ /^(root|file|folder|implicit|dynamicFile|dynamicFolder)$/ && isMac && !isWeb",
+					"group": "navigation@30"
+				},
+				{
+					"command": "fileWorksets.revealFileInOS.linux",
+					"when": "view =~ /^fileWorksets\\./ && viewItem =~ /^(root|file|folder|implicit|dynamicFile|dynamicFolder)$/ && isLinux && !isWeb",
+					"group": "navigation@30"
+				},
+				{
+					"command": "fileWorksets.openInIntegratedTerminal",
+					"when": "view =~ /^fileWorksets\\./ && viewItem =~ /^(root|file|folder|implicit|dynamicFile|dynamicFolder)$/",
+					"group": "navigation@40"
+				},
+				{
+					"command": "fileWorksets.revealInExplorer",
+					"when": "view =~ /^fileWorksets\\./ && viewItem =~ /^(root|file|folder|implicit|dynamicFile|dynamicFolder)$/",
+					"group": "navigation@50"
+				},
+				{
+					"command": "fileWorksets.compareWithSelected",
+					"when": "view =~ /^fileWorksets\\./ && viewItem =~ /^(file|dynamicFile)$/ && resourceSelectedForCompare",
+					"group": "3_compare@10"
+				},
+				{
+					"command": "fileWorksets.selectForCompare",
+					"when": "view =~ /^fileWorksets\\./ && viewItem =~ /^(file|dynamicFile)$/",
+					"group": "3_compare@20"
+				},
+				{
+					"command": "fileWorksets.compareSelected",
+					"when": "view =~ /^fileWorksets\\./ && viewItem =~ /^(file|dynamicFile)$/ && listDoubleSelection",
+					"group": "3_compare@30"
+				},
+				{
+					"command": "fileWorksets.findInFolder",
+					"when": "view =~ /^fileWorksets\\./ && viewItem =~ /^(root|folder|implicit|dynamicFolder)$/",
+					"group": "4_search@10"
+				},
+				{
+					"command": "fileWorksets.copyPath",
+					"when": "view =~ /^fileWorksets\\./ && viewItem =~ /^(root|file|folder|implicit|dynamicFile|dynamicFolder)(\\.missing)?$/",
+					"group": "6_copypath@10"
+				},
+				{
+					"command": "fileWorksets.copyRelativePath",
+					"when": "view =~ /^fileWorksets\\./ && viewItem =~ /^(file|folder|implicit|dynamicFile|dynamicFolder)(\\.missing)?$/",
+					"group": "6_copypath@20"
+				},
+				{
+					"command": "fileWorksets.renameFile",
+					"when": "view =~ /^fileWorksets\\./ && viewItem =~ /^(file|folder|implicit|dynamicFile|dynamicFolder)$/",
+					"group": "7_modification@10"
+				},
+				{
+					"command": "fileWorksets.deleteFile",
+					"when": "view =~ /^fileWorksets\\./ && viewItem =~ /^(file|folder|implicit|dynamicFile|dynamicFolder)$/",
+					"group": "7_modification@20"
+				},
+				{
+					"command": "fileWorksets.removeFromWorkset",
+					"when": "view =~ /^fileWorksets\\./ && viewItem =~ /^(root|file|folder|implicit)(\\.missing)?$/",
+					"group": "8_workset@10"
+				},
+				{
+					"command": "fileWorksets.copyToWorkset",
+					"when": "view =~ /^fileWorksets\\./ && viewItem =~ /^(root|file|folder|implicit|dynamicFile|dynamicFolder)(\\.missing)?$/",
+					"group": "8_workset@20"
+				},
+				{
+					"command": "fileWorksets.moveToWorkset",
+					"when": "view =~ /^fileWorksets\\./ && viewItem =~ /^(root|file|folder|implicit)(\\.missing)?$/",
+					"group": "8_workset@30"
+				},
+				{
+					"command": "fileWorksets.removeFromWorkset",
+					"when": "view =~ /^fileWorksets\\./ && viewItem =~ /^(file|folder)(\\.missing)?$/",
+					"group": "inline"
+				}
+			]
+		},
+		"keybindings": [
+			{
+				"command": "fileWorksets.removeFromWorkset",
+				"key": "delete",
+				"mac": "cmd+backspace",
+				"when": "focusedView == fileWorksets.files && !inputFocus",
+				"args": "fileWorksets.files"
+			},
+			{
+				"command": "fileWorksets.renameFile",
+				"key": "f2",
+				"mac": "enter",
+				"when": "focusedView == fileWorksets.files && !inputFocus",
+				"args": "fileWorksets.files"
+			},
+			{
+				"command": "fileWorksets.openToSide",
+				"key": "ctrl+enter",
+				"when": "focusedView == fileWorksets.files && !inputFocus",
+				"args": "fileWorksets.files"
+			},
+			{
+				"command": "fileWorksets.copyPath",
+				"key": "ctrl+alt+c",
+				"mac": "cmd+alt+c",
+				"win": "shift+alt+c",
+				"when": "focusedView == fileWorksets.files && !inputFocus",
+				"args": "fileWorksets.files"
+			},
+			{
+				"command": "fileWorksets.copyRelativePath",
+				"key": "ctrl+shift+alt+c",
+				"mac": "cmd+shift+alt+c",
+				"win": "ctrl+k ctrl+shift+c",
+				"when": "focusedView == fileWorksets.files && !inputFocus",
+				"args": "fileWorksets.files"
+			},
+			{
+				"command": "fileWorksets.revealFileInOS.windows",
+				"key": "shift+alt+r",
+				"when": "focusedView == fileWorksets.files && !inputFocus && isWindows",
+				"args": "fileWorksets.files"
+			},
+			{
+				"command": "fileWorksets.revealFileInOS.mac",
+				"key": "cmd+alt+r",
+				"when": "focusedView == fileWorksets.files && !inputFocus && isMac",
+				"args": "fileWorksets.files"
+			},
+			{
+				"command": "fileWorksets.revealFileInOS.linux",
+				"key": "ctrl+alt+r",
+				"when": "focusedView == fileWorksets.files && !inputFocus && isLinux",
+				"args": "fileWorksets.files"
+			},
+			{
+				"command": "fileWorksets.removeFromWorkset",
+				"key": "delete",
+				"mac": "cmd+backspace",
+				"when": "focusedView == fileWorksets.list && !inputFocus",
+				"args": "fileWorksets.list"
+			},
+			{
+				"command": "fileWorksets.renameFile",
+				"key": "f2",
+				"mac": "enter",
+				"when": "focusedView == fileWorksets.list && !inputFocus",
+				"args": "fileWorksets.list"
+			},
+			{
+				"command": "fileWorksets.openToSide",
+				"key": "ctrl+enter",
+				"when": "focusedView == fileWorksets.list && !inputFocus",
+				"args": "fileWorksets.list"
+			},
+			{
+				"command": "fileWorksets.copyPath",
+				"key": "ctrl+alt+c",
+				"mac": "cmd+alt+c",
+				"win": "shift+alt+c",
+				"when": "focusedView == fileWorksets.list && !inputFocus",
+				"args": "fileWorksets.list"
+			},
+			{
+				"command": "fileWorksets.copyRelativePath",
+				"key": "ctrl+shift+alt+c",
+				"mac": "cmd+shift+alt+c",
+				"win": "ctrl+k ctrl+shift+c",
+				"when": "focusedView == fileWorksets.list && !inputFocus",
+				"args": "fileWorksets.list"
+			},
+			{
+				"command": "fileWorksets.revealFileInOS.windows",
+				"key": "shift+alt+r",
+				"when": "focusedView == fileWorksets.list && !inputFocus && isWindows",
+				"args": "fileWorksets.list"
+			},
+			{
+				"command": "fileWorksets.revealFileInOS.mac",
+				"key": "cmd+alt+r",
+				"when": "focusedView == fileWorksets.list && !inputFocus && isMac",
+				"args": "fileWorksets.list"
+			},
+			{
+				"command": "fileWorksets.revealFileInOS.linux",
+				"key": "ctrl+alt+r",
+				"when": "focusedView == fileWorksets.list && !inputFocus && isLinux",
+				"args": "fileWorksets.list"
+			}
+		],
+		"colors": [
+			{
+				"id": "fileWorksets.worksetFileForeground",
+				"description": "Color of file and folder names in the active workset, when fileWorksets.explorerDecoration is 'color' or 'both'. Defaults to the keyword color of Dark+ and Light+, mixed 30% toward the default text color; high contrast themes use their purple.",
+				"defaults": {
+					"dark": "#C79BC4",
+					"light": "#981DB6",
+					"highContrast": "charts.purple",
+					"highContrastLight": "charts.purple"
+				}
+			}
+		],
+		"configuration": {
+			"title": "File Worksets",
+			"properties": {
+				"fileWorksets.storageLocation": {
+					"type": "string",
+					"enum": [
+						"workspaceState",
+						"workspaceFolder"
+					],
+					"enumDescriptions": [
+						"Store worksets in VS Code's per-workspace extension storage. Nothing is written to the repository, and each workspace and editor (VS Code, Insiders, ...) has its own worksets.",
+						"Store worksets in `.vscode/file-worksets.json` in the first workspace folder, for example to commit and share them."
+					],
+					"default": "workspaceState",
+					"scope": "window",
+					"markdownDescription": "Where workset definitions are saved. The active workset and last-used times are always kept in VS Code's per-workspace storage, so switching worksets never modifies files. When you change this setting, existing worksets are copied to the new location if it is empty; otherwise the worksets already stored there are loaded. With `workspaceState`, an existing `.vscode/file-worksets.json` is read until the first change is saved."
+				},
+				"fileWorksets.sortOrder": {
+					"type": "string",
+					"enum": [
+						"lastUsed",
+						"created",
+						"name"
+					],
+					"enumDescriptions": [
+						"Most recently used first.",
+						"Most recently created first.",
+						"Alphabetical by name."
+					],
+					"default": "created",
+					"description": "Sort order of the File Worksets view."
+				},
+				"fileWorksets.showStatusBarItem": {
+					"type": "boolean",
+					"default": true,
+					"description": "Show the active workset in the status bar. Click it to switch worksets."
+				},
+				"fileWorksets.explorerDecoration": {
+					"type": "string",
+					"enum": [
+						"color",
+						"badge",
+						"both",
+						"off"
+					],
+					"enumDescriptions": [
+						"Tint their names with the `fileWorksets.worksetFileForeground` color. Least crowded next to Git's badges, but Git's color may take precedence on changed files.",
+						"Show a badge (`fileWorksets.explorerDecorationBadge`, ★ by default) on files and folders in the active workset.",
+						"Badge and tinted name.",
+						"Don't mark them."
+					],
+					"default": "color",
+					"markdownDescription": "How files and folders in the active workset are marked in the Explorer, editor tabs, and other places that show file decorations. Parent folders get a small dot. For folders added as a whole, only the folder itself is marked."
+				},
+				"fileWorksets.explorerDecorationBadge": {
+					"type": "string",
+					"default": "★",
+					"maxLength": 2,
+					"markdownDescription": "Badge text used when `fileWorksets.explorerDecoration` is `badge` or `both`. At most 2 characters, for example `★`, `◆`, `·` or `W`."
+				},
+				"fileWorksets.autoAdd": {
+					"type": "string",
+					"enum": [
+						"off",
+						"opened",
+						"edited"
+					],
+					"enumDescriptions": [
+						"Only add files manually.",
+						"Add files you open in a regular tab. Single-click previews (italic tabs) are not added.",
+						"Add files when you type in them. Changes from refactorings or Replace All are not counted."
+					],
+					"default": "edited",
+					"scope": "window",
+					"markdownDescription": "Automatically add files to the active workset. Nothing is added while no workset is active. Can also be changed with the button in the **Workset Files** title bar."
+				}
+			}
+		}
+	},
+	"scripts": {
+		"build": "node esbuild.mjs",
+		"watch": "node esbuild.mjs --watch",
+		"typecheck": "tsc -p .",
+		"test:unit": "node --test \"test/unit/**/*.test.ts\"",
+		"pretest:integration": "node esbuild.mjs && node esbuild.mjs --tests",
+		"test:integration": "vscode-test",
+		"test": "npm run typecheck && npm run lint && npm run test:unit && npm run test:integration",
+		"vscode:prepublish": "node esbuild.mjs --production",
+		"package": "vsce package --no-dependencies --no-rewrite-relative-links",
+		"lint": "eslint ."
+	},
+	"devDependencies": {
+		"@stylistic/eslint-plugin": "6.0.1",
+		"@types/mocha": "10.0.10",
+		"@types/node": "24.19.2",
+		"@types/vscode": "1.100.0",
+		"@typescript/typescript6": "6.0.2",
+		"@vscode/test-cli": "0.0.15",
+		"@vscode/test-electron": "3.1.0",
+		"@vscode/vsce": "4.1.1",
+		"esbuild": "0.28.2",
+		"eslint": "10.15.0",
+		"eslint-plugin-prefer-let": "4.2.2",
+		"mocha": "12.0.3",
+		"typescript": "7.0.2",
+		"typescript-eslint": "8.73.0"
+	},
+	"overrides": {
+		"typescript": "$typescript"
+	}
+}

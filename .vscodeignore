@@ -1,0 +1,6 @@
+**
+!dist/extension.cjs
+!resources/**
+!package.json
+!README.md
+!FEATURES.md
