@@ -6,7 +6,7 @@
 
 - **Own activity bar container, "File Worksets"**, with two views. Both can be dragged into the Explorer container or anywhere else, like any built-in view.
 - **Workset Files**
-  - Shows only the active workset's files, grouped by workspace-relative folder path. Folders appear only if they lead to a selected file. Siblings on disk are never listed.
+  - Shows only the active workset's files, grouped by workspace-relative folder path.
   - Looks like the Explorer:
     - File icon theme.
     - Compact folders (`src \ lib \ deep`, using the OS path separator and thin spaces like the Explorer's margins), following `explorer.compactFolders`. This also applies to subfolder chains inside folders added as a whole.
@@ -37,11 +37,12 @@
   - The badge text is set with `fileWorksets.explorerDecorationBadge`: ★ by default, at most 2 characters. VS Code only allows text badges, not icons.
   - On files that Git also colors (modified, untracked, …), Git's color may take precedence.
   - VS Code applies file decorations everywhere a file is shown, so the badge also appears in editor tabs, Open Editors, and on the items in Workset Files. An extension can't limit it to the Explorer without also losing Git's decorations in its own views.
-- **Welcome content** for the cases where no folder is open, no workset is active, or the workset is empty. It's only shown once the worksets have loaded. While VS Code starts up, the views show VS Code's thin progress bar instead of briefly flashing an empty state.
+- **Welcome content** for when no folder is open. It's only shown once the worksets have loaded. While VS Code starts up, the views show VS Code's thin progress bar instead of briefly flashing an empty state.
+- **No active workset** and **empty workset** are shown as rows in Workset Files instead of welcome content, because welcome content hides the tree and the view's message area isn't a drop target either. A hint ("No active workset" / "This workset is empty", with a dimmed "Drop files here to create one" / "…to add them" on the next line; full text in the tooltip) is followed by **Add Active Editor** and **Add All Open Editors** rows that act as buttons. Dropping anywhere in the view, including on these rows, creates a new workset or adds to the empty one.
 
 ### Managing worksets
 
-- Create, rename, duplicate, and delete worksets. Deleting happens right away, without a confirmation dialog. A notification ("Deleted workset "…".") offers **Undo**, which brings the worksets back with the same ID, name, creation time, files, and last-used time, and makes the active one active again. If its name was taken in the meantime, the restored workset becomes unnamed.
+- Create, rename, duplicate, and delete worksets. The active workset can also be deleted from the Workset Files "…" (More Actions) menu. Deleting happens right away, without a confirmation dialog. A notification ("Deleted workset "…".") offers **Undo**, which brings the worksets back with the same ID, name, creation time, files, and last-used time. A deleted active workset becomes active again, unless you've activated another one in the meantime. If its name was taken in the meantime, the restored workset becomes unnamed.
 - **New worksets have no name.** They're shown by their creation time ("2026-11-20 23:51") until you rename them. Renaming is easy from several places:
   - The pencil button on the row.
   - <kbd>F2</kbd> in the File Worksets list.
@@ -49,9 +50,9 @@
   - The Workset Files "…" menu.
   - The rename button in Switch/New Workset.
   Clearing the name makes the workset unnamed again. Names must be unique, ignoring case.
-- <kbd>Delete</kbd> (<kbd>Cmd+Backspace</kbd> on macOS) on selected worksets in the File Worksets list deletes them, with Undo in the notification. With several worksets selected, all of them are deleted at once, from the key or the context menu. **Delete Workset…** in the Command Palette opens a multi-select picker.
-- **Switch/New Workset…** (palette, status bar, Workset Files toolbar) opens a Quick Pick in the same order as the File Worksets list (`fileWorksets.sortOrder`). The active workset is highlighted when it opens (or **No Active Workset** if none is active), so you see where you are. The Quick Pick also has inline rename and delete buttons and a **New Workset** entry. The other workset pickers (Add to Workset…, Copy/Move to Workset…, Delete Workset…) use the same order.
-- Switching only updates the sidebar. It never opens or closes tabs, changes Git state, or modifies files. It doesn't write to the storage either.
+- <kbd>Delete</kbd> (<kbd>Cmd+Backspace</kbd> on macOS) on selected worksets in the File Worksets list deletes them, with Undo in the notification. With several worksets selected, all of them are deleted at once, from the key or the context menu. **Delete Workset** in the Command Palette opens a multi-select picker.
+- **Switch/New Workset…** (palette, status bar, Workset Files toolbar) opens a Quick Pick in the same order as the File Worksets list (`fileWorksets.sortOrder`). The active workset is highlighted when it opens (or **No Active Workset** if none is active), so you see where you are. The Quick Pick also has inline rename and delete buttons and a **New Workset** entry. The other workset pickers (Add to Workset…, Copy/Move to Workset…, Delete Workset from the palette) use the same order.
+- Switching only updates the sidebar. It never opens or closes tabs, changes Git state, or modifies files. Workset definitions aren't rewritten either; only the active workset and last-used time are recorded in VS Code's workspace state.
 - **No active workset** is a valid state for working without a workset in mind. Nothing is auto-added and Workset Files is empty; deleting files in VS Code still removes them from any workset that contains them. You can get there in four ways:
   - **Deactivate Workset** in the Command Palette.
   - The ⊘ button on the active row in the File Worksets list, or its context menu.
@@ -67,7 +68,7 @@
 - If no workset is active, a new unnamed workset is created and activated, without asking.
 - Adding something that's already included is a no-op, including a file inside an already-added folder. A short status bar message reports what was added.
 - A file can belong to any number of worksets.
-- **Folder entries** include everything in the folder. The contents come from disk when you expand the folder, so new and deleted files show up automatically. Entries matching `files.exclude` are hidden. Folder entries are labeled "entire folder".
+- **Folder entries** include everything in the folder. The contents come from disk when you expand the folder, so new and deleted files show up automatically. Entries matching `files.exclude` are hidden. Conditional patterns (`"when": "$(basename).ts"`) aren't supported, and invalid patterns are skipped. Folder entries are labeled "entire folder".
 - **Remove from Workset** (inline ✕ button or context menu) removes only the reference. Removing an implicit folder or a workspace-root node removes all entries under it, without asking. Files that are shown only because their parent folder was added can't be removed individually; you'll be told which folder includes them.
 - **Remove Missing Files from Workset** cleans up references whose files no longer exist.
 
@@ -76,7 +77,7 @@
 - The `fileWorksets.autoAdd` setting adds files to the active workset automatically:
   - **Off.**
   - **Opened Files:** files opened in a regular tab. Single-click previews (italic tabs) aren't added until they become regular tabs, for example by double-clicking or editing.
-  - **Edited Files** (default): files you type in. Only changes in the active editor count, so Replace All across files and rename refactorings don't add files.
+  - **Edited Files** (default): files whose content changes in the active editor. Edits to other files don't count, so Replace All across files and rename refactorings don't add all the files they touch. VS Code doesn't report where an edit came from, so a refactoring that changes the active file does add it.
 - A button in the **Workset Files** title bar shows the current mode as an icon (⊘ off, eye for opened, pencil for edited). Clicking it opens a picker. **Set Auto-Add Mode…** in the Command Palette does the same.
 - The button writes to user settings, unless the setting is already defined at workspace level, so it doesn't modify the repo's `.vscode/settings.json`.
 - Nothing is added while no workset is active, and you're never prompted. The storage file `.vscode/file-worksets.json` itself is never added.
@@ -84,7 +85,7 @@
 
 ### Drag and drop
 
-- From the Explorer or editor tabs onto **Workset Files**: adds the items to the active workset.
+- From the Explorer or editor tabs onto **Workset Files**: adds the items to the active workset. With no active workset, dropping there creates a new one from the dropped items.
 - From the Explorer onto a workset in **File Worksets**: adds the items to that workset.
 - From **Workset Files** or another workset onto a workset: copies the items. Dropping an implicit folder copies all entries under it.
 - Dragging a whole workset onto another workset, or onto Workset Files, merges its entries.
@@ -124,14 +125,18 @@ VS Code doesn't let extensions reuse the Explorer's own context menu in their vi
   - Files and folders are stored in separate lists.
   - Multi-root entries are stored as `{ "root": "<folder name>", "path": "…" }`.
 - The active workset and last-used times live in VS Code's workspace state, so switching never changes the repo.
-- External changes to the file (manual edits, `git checkout`, `git pull`) are reloaded live. If the file can't be parsed, a warning is shown and saving pauses until it's fixed, so your edits aren't overwritten.
+- External changes to the file (manual edits, `git checkout`, `git pull`) are reloaded live.
+  - **Outside edits aren't overwritten.** Before saving, the extension checks that the file still holds what it last read or wrote. If someone changed it in the meantime, the outside version is loaded, and a warning says your last change wasn't saved. VS Code's file API has no atomic "write only if unchanged", so an edit landing in the few milliseconds between that check and the write can still be lost.
+  - **Unreadable or newer-format files:** if the file can't be parsed, or was written by a newer format version, a warning is shown. Worksets can't be changed until the file is fixed, so nothing is lost or overwritten.
+  - **During a storage switch,** changes are blocked until the new location has been read.
 - Changing `fileWorksets.storageLocation` copies your worksets to the new location if it's empty. Otherwise the worksets already stored there are loaded.
 - Loaded data is validated. Absolute paths, drive letters, and `.`/`..` segments are rejected, so a committed file can't point outside the workspace.
 
 ### Missing, deleted and renamed files
 
 - **Deleted in VS Code** (Explorer, Delete commands, refactorings, anything using `onDidDeleteFiles`): the file or folder is removed from **all** worksets automatically. A status bar message says how many items were removed.
-- **Restored within 24 hours:** if a deleted path reappears on disk, for example through `git restore`, Discard Changes, or undoing the delete, it's added back to the worksets it was removed from. Pending restores are kept in workspace state, so they survive a reload.
+- **Restored within 24 hours:** if a deleted path reappears on disk, for example through `git restore`, Discard Changes, undoing the delete, or switching back to a branch, it's added back to the worksets it was removed from. Each reference comes back only once its own path exists again: recreating one file from a deleted folder restores just that file. It's restored into the workspace folder it was deleted from, even if the default folder changed meanwhile. If saving the restore hits an outside edit, the record is kept and the restore is retried once against the loaded version. Pending restores are kept in workspace state, so they survive a reload. After loading, paths that came back while VS Code was closed are restored too.
+- **Scales to large deletes:** records are grouped per deleted path and indexed by path, so each file event costs a lookup proportional to the path depth, not a scan of all records. Events are batched (50 ms) into one update per workset, and a path is checked on disk before it's restored, because file events can arrive late. The file watcher's "does this event touch a workset" check is indexed the same way, so a branch switch creating thousands of files stays cheap.
 - **Gone from disk for other reasons** (switching git branches, `git checkout`, deleting from a terminal or another app): references are **kept**. They're greyed out with a `!` badge and labeled "missing", and they return to normal when the file reappears. VS Code only fires `onDidDeleteFiles` for its own deletes, which is what makes this distinction possible.
 - Renaming or moving files and folders through VS Code (Explorer, refactorings) updates the references in all worksets.
 - The views refresh automatically, debounced, when files are created or deleted at or under a referenced path.
@@ -175,9 +180,13 @@ VS Code doesn't let extensions reuse the Explorer's own context menu in their vi
 
 - [ ] **Multi-root edge cases.**
   - Entries whose workspace folder isn't open are kept but hidden. Show them as missing under a placeholder root instead.
-  - Roots are identified by folder name. If several workspace folders share a name, they're treated as ambiguous: their entries are hidden and adding from them is skipped. A unique root ID would fix this.
+  - Roots are identified by folder name. If several workspace folders share a name, they're treated as ambiguous: their entries are hidden and adding from them is skipped. Renaming a folder or reusing a name for a different folder makes references follow the name. A unique root ID would fix both.
+  - References added in a single-folder workspace are pinned to that folder's name when folders are added or removed. So they keep pointing at the folder they came from, instead of at whichever folder is first. This is tracked per storage source: when the folder change loads a different repo's `.vscode/file-worksets.json`, that file's references belong to its own folder and aren't pinned to the previous one. Worksets carried over when switching storage location are pinned to the current default folder first.
   - Storage always uses the first folder. Consider storing next to the `.code-workspace` file instead.
-- [ ] **Case-only renames on Windows and macOS.** Duplicate detection is case-sensitive.
+- [ ] **Path case on Windows and macOS.** Matching of references is case-sensitive, apart from the workspace folder part. A hand-edited `src/Readme.md` opens `src/README.md`, but doesn't match it for duplicate detection, delete events, auto-reveal, or Explorer marks. Paths added through VS Code always use the on-disk spelling.
+- [ ] **Edit provenance for auto-add.** VS Code doesn't say whether a change to the active file was typed or came from a refactoring.
+- [ ] **Links pointing outside the workspace.** Delete, rename and New File/Folder check this for local files (resolving symlinks and junctions) and refuse. Other file systems can't be checked.
+- [ ] **Integration tests** depend on each other's state and call commands directly rather than through VS Code's menus and keybindings. Make each test independent and add a few UI smoke tests.
 - [ ] **Files outside the workspace** are currently rejected. They could be supported with absolute URIs, stored only in workspace state.
 - [ ] **Merge on storage-location change.** Today it either migrates into an empty location or loads the target.
 - [ ] **Large folder entries.** Consider lazy paging and a respect-`.gitignore` option, similar to `explorer.excludeGitIgnore`.

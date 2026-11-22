@@ -97,16 +97,38 @@ export interface SortItem {
 	readonly name: string;
 }
 
+function startsWithUpper(name: string): boolean {
+	let first = name.charAt(0);
+	return first !== first.toLowerCase() && first === first.toUpperCase();
+}
+
+function startsWithLower(name: string): boolean {
+	let first = name.charAt(0);
+	return first !== first.toUpperCase() && first === first.toLowerCase();
+}
+
+/** Like VS Code's `compareFileNamesUpper`/`Lower`: group by the case of the first letter, then by name. */
+function compareCaseFirst(a: string, b: string, upperFirst: boolean): number {
+	let aUpper = startsWithUpper(a);
+	let bUpper = startsWithUpper(b);
+	let aLower = startsWithLower(a);
+	let bLower = startsWithLower(b);
+	if (aUpper && bLower) {
+		return upperFirst ? -1 : 1;
+	}
+	if (aLower && bUpper) {
+		return upperFirst ? 1 : -1;
+	}
+	return 0;
+}
+
 function compareLexicographic(a: string, b: string, lexicographic: LexicographicOrder): number {
 	switch (lexicographic) {
 		case 'unicode':
 			return a < b ? -1 : a > b ? 1 : 0;
 		case 'upper':
 		case 'lower':
-			return (
-				a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }) ||
-				a.localeCompare(b, undefined, { numeric: true, caseFirst: lexicographic })
-			);
+			return compareCaseFirst(a, b, lexicographic === 'upper') || compareNames(a, b);
 		default:
 			return compareNames(a, b);
 	}

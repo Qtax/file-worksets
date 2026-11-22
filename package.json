@@ -62,16 +62,6 @@
 				"when": "fileWorksets.filesLoaded && workspaceFolderCount == 0"
 			},
 			{
-				"view": "fileWorksets.files",
-				"contents": "No workset is active. Files aren't added to any workset automatically. Adding a file creates a new workset.\n[New Workset](command:fileWorksets.createWorkset)\n[Switch/New Workset](command:fileWorksets.switchWorkset)",
-				"when": "fileWorksets.filesLoaded && workspaceFolderCount > 0 && !fileWorksets.hasActiveWorkset"
-			},
-			{
-				"view": "fileWorksets.files",
-				"contents": "This workset is empty. Drag files or folders here from the Explorer, or right-click them and choose \"Add to Active Workset\".\n[Add Active Editor](command:fileWorksets.addActiveEditor)\n[Add All Open Editors](command:fileWorksets.addOpenEditors)",
-				"when": "fileWorksets.filesLoaded && workspaceFolderCount > 0 && fileWorksets.hasActiveWorkset"
-			},
-			{
 				"view": "fileWorksets.list",
 				"contents": "\u200b",
 				"when": "!fileWorksets.listLoaded"
@@ -120,7 +110,12 @@
 			},
 			{
 				"command": "fileWorksets.deleteWorkset",
-				"title": "Delete Workset...",
+				"title": "Delete Workset(s)...",
+				"category": "File Worksets"
+			},
+			{
+				"command": "fileWorksets.deleteActiveWorkset",
+				"title": "Delete Active Workset",
 				"category": "File Worksets"
 			},
 			{
@@ -293,6 +288,10 @@
 		],
 		"menus": {
 			"commandPalette": [
+				{
+					"command": "fileWorksets.deleteActiveWorkset",
+					"when": "false"
+				},
 				{
 					"command": "fileWorksets.deactivateWorkset",
 					"when": "fileWorksets.hasActiveWorkset"
@@ -476,6 +475,11 @@
 					"command": "fileWorksets.deactivateWorkset",
 					"when": "view == fileWorksets.files && fileWorksets.hasActiveWorkset",
 					"group": "3_workset@1"
+				},
+				{
+					"command": "fileWorksets.deleteActiveWorkset",
+					"when": "view == fileWorksets.files && fileWorksets.hasActiveWorkset",
+					"group": "3_workset@2"
 				},
 				{
 					"command": "fileWorksets.renameWorkset",
@@ -843,7 +847,7 @@
 					"enumDescriptions": [
 						"Only add files manually.",
 						"Add files you open in a regular tab. Single-click previews (italic tabs) are not added.",
-						"Add files when you type in them. Changes from refactorings or Replace All are not counted."
+						"Add files when their content changes in the active editor. Edits to other files (Replace All, refactorings) are not counted."
 					],
 					"default": "edited",
 					"scope": "window",

@@ -4,13 +4,12 @@ import { AUTO_ADD_MODES, AutoAdder, isAutoAddMode, readAutoAddMode, type AutoAdd
 import { ActiveEditorRevealer } from './autoReveal.ts';
 import { DeletionTracker } from './deletions.ts';
 import { WorksetFileDecorations } from './decorations.ts';
-import { isSameOrUnder } from './core/paths.ts';
-import { sameRoot, worksetLabel, type SortOrder } from './core/model.ts';
+import { touchIndex, worksetLabel, type SortOrder } from './core/model.ts';
 import { FileTreeService, isFileNode, isWorksetNode, MissingFileDecorations, type FileNode, type TreeNode } from './fileTree.ts';
 import { WorkspaceRoots } from './roots.ts';
 import { FileStorageBackend, MementoStorageBackend, STORAGE_FILE, type StorageBackend } from './storage.ts';
 import { WorksetStore } from './store.ts';
-import { ACTIVE_VIEW_ID, ActiveFilesProvider, LIST_VIEW_ID, WorksetsProvider } from './views.ts';
+import { ACTIVE_VIEW_ID, ActiveFilesProvider, LIST_VIEW_ID, WorksetsProvider, type ActiveNode } from './views.ts';
 
 /** Must match the view's `name` in package.json. */
 const ACTIVE_VIEW_NAME = 'Workset Files';
@@ -20,7 +19,7 @@ export interface FileWorksetsApi {
 	readonly actions: WorksetActions;
 	readonly activeFiles: ActiveFilesProvider;
 	readonly worksets: WorksetsProvider;
-	readonly activeView: vscode.TreeView<FileNode>;
+	readonly activeView: vscode.TreeView<ActiveNode>;
 	readonly listView: vscode.TreeView<TreeNode>;
 	readonly revealer: ActiveEditorRevealer;
 	readonly decorations: WorksetFileDecorations;
@@ -29,12 +28,17 @@ export interface FileWorksetsApi {
 function createBackend(context: vscode.ExtensionContext, roots: WorkspaceRoots): StorageBackend | undefined {
 	let folder = roots.folders()[0];
 	if (!folder) {
+		roots.useSource(undefined);
 		return undefined;
 	}
 	let location = vscode.workspace.getConfiguration('fileWorksets').get<string>('storageLocation', 'workspaceState');
-	return location === 'workspaceFolder'
-		? new FileStorageBackend(folder)
-		: new MementoStorageBackend(context.workspaceState, vscode.Uri.joinPath(folder.uri, ...STORAGE_FILE.split('/')));
+	if (location === 'workspaceFolder') {
+		let backend = new FileStorageBackend(folder);
+		roots.useSource({ file: backend.uri, folder: folder.name });
+		return backend;
+	}
+	roots.useSource(undefined);
+	return new MementoStorageBackend(context.workspaceState, vscode.Uri.joinPath(folder.uri, ...STORAGE_FILE.split('/')));
 }
 
 function isUri(value: unknown): value is vscode.Uri {
@@ -53,6 +57,22 @@ function urisFromArgs(primary: unknown, selection: unknown): vscode.Uri[] {
 	return uri ? [uri] : [];
 }
 
+/**
+ * Updates a `fileWorksets.*` setting where it's already defined (folder or workspace), otherwise in user
+ * settings, so a workspace value doesn't silently win and the repo's settings aren't modified needlessly.
+ */
+async function updateSetting(key: string, value: unknown): Promise<void> {
+	let config = vscode.workspace.getConfiguration('fileWorksets');
+	let inspected = config.inspect(key);
+	let target =
+		inspected?.workspaceFolderValue !== undefined
+			? vscode.ConfigurationTarget.WorkspaceFolder
+			: inspected?.workspaceValue !== undefined
+				? vscode.ConfigurationTarget.Workspace
+				: vscode.ConfigurationTarget.Global;
+	await config.update(key, value, target);
+}
+
 function debounce(fn: () => void, ms: number): { (): void; dispose(): void } {
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	let debounced = (): void => {
@@ -63,7 +83,7 @@ function debounce(fn: () => void, ms: number): { (): void; dispose(): void } {
 }
 
 export async function activate(context: vscode.ExtensionContext): Promise<FileWorksetsApi> {
-	let roots = new WorkspaceRoots();
+	let roots = new WorkspaceRoots(context.workspaceState);
 	let store = new WorksetStore(context.workspaceState, roots);
 	let tree = new FileTreeService(store, roots);
 	let actions = new WorksetActions(store, roots);
@@ -104,6 +124,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<FileWo
 		worksets.refresh();
 	};
 
+	// Keeps references stored without a root attached to their original folder when folders change.
+	let pinRootlessEntries = (): void => {
+		let owner = roots.rootlessOwner();
+		if (owner !== undefined) {
+			store.pinRootless(owner);
+		}
+	};
+
 	let updateChrome = (): void => {
 		let active = store.active;
 		// Shown as "File Worksets: <name>" when this is the only visible view in the container.
@@ -131,23 +159,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<FileWo
 		}),
 	);
 
-	// File system changes only matter if they touch a referenced path or a folder entry.
+	// File system changes only matter if they touch a referenced path or a folder entry. The lookup is
+	// indexed because a branch switch can produce thousands of events.
 	let refreshSoon = debounce(refreshViews, 250);
 	context.subscriptions.push(refreshSoon);
+	let touches: { defaultRoot: string | undefined; lookup: (root: string | undefined, path: string) => boolean } | undefined;
+	context.subscriptions.push(store.onDidChange(() => (touches = undefined)));
 	let onFsEvent = (uri: vscode.Uri): void => {
 		let location = roots.locate(uri);
 		if (!location) {
 			return;
 		}
 		let defaultRoot = roots.defaultRoot();
-		let relevant = store.all.some((w) =>
-			w.entries.some(
-				(e) =>
-					sameRoot(e.root, location.root, defaultRoot) &&
-					(isSameOrUnder(location.path, e.path) || isSameOrUnder(e.path, location.path)),
-			),
-		);
-		if (relevant) {
+		if (!touches || touches.defaultRoot !== defaultRoot) {
+			touches = { defaultRoot, lookup: touchIndex(store.all.flatMap((w) => w.entries), defaultRoot) };
+		}
+		if (touches.lookup(location.root, location.path)) {
 			refreshSoon();
 		}
 	};
@@ -171,11 +198,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<FileWo
 		}),
 		vscode.workspace.onDidChangeWorkspaceFolders(async () => {
 			await store.useBackend(createBackend(context, roots));
+			pinRootlessEntries();
 			refreshViews();
 		}),
 		vscode.workspace.onDidChangeConfiguration(async (event) => {
 			if (event.affectsConfiguration('fileWorksets.storageLocation')) {
-				await store.useBackend(createBackend(context, roots), true);
+				// Carried-over rootless entries belong to the current default folder, which the new
+				// source may not share.
+				let rootlessOwner = roots.isMultiRoot() ? roots.defaultRoot() : undefined;
+				await store.useBackend(createBackend(context, roots), { rootlessOwner });
 			}
 			if (
 				event.affectsConfiguration('fileWorksets.showStatusBarItem') ||
@@ -199,7 +230,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<FileWo
 	// Menus pass (item, selectedItems); keybindings pass the focused view's ID (see package.json).
 	let nodesFor = (primary: unknown, selection: unknown): FileNode[] => {
 		if (primary === ACTIVE_VIEW_ID) {
-			return [...activeView.selection];
+			return activeView.selection.filter(isFileNode);
 		}
 		if (primary === LIST_VIEW_ID) {
 			return listView.selection.filter(isFileNode);
@@ -236,6 +267,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<FileWo
 			await actions.deleteWorkset(id);
 		}
 	});
+	register('fileWorksets.deleteActiveWorkset', () => {
+		let active = store.active;
+		if (active) {
+			actions.deleteWorksets([active.id]);
+		}
+	});
 	register('fileWorksets.sortWorksets', async () => {
 		let config = vscode.workspace.getConfiguration('fileWorksets');
 		let current = config.get<SortOrder>('sortOrder', 'created');
@@ -249,7 +286,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<FileWo
 			{ placeHolder: 'Sort worksets by' },
 		);
 		if (picked) {
-			await config.update('sortOrder', picked.value, vscode.ConfigurationTarget.Global);
+			await updateSetting('sortOrder', picked.value);
 		}
 	});
 	register('fileWorksets.refresh', refreshViews);
@@ -274,16 +311,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<FileWo
 		if (!mode || mode === current) {
 			return;
 		}
-		// Write where the value is already defined; otherwise to user settings, so the repo isn't modified.
-		let config = vscode.workspace.getConfiguration('fileWorksets');
-		let inspected = config.inspect<string>('autoAdd');
-		let target =
-			inspected?.workspaceFolderValue !== undefined
-				? vscode.ConfigurationTarget.WorkspaceFolder
-				: inspected?.workspaceValue !== undefined
-					? vscode.ConfigurationTarget.Workspace
-					: vscode.ConfigurationTarget.Global;
-		await config.update('autoAdd', mode, target);
+		await updateSetting('autoAdd', mode);
 	};
 	register('fileWorksets.setAutoAdd', setAutoAdd);
 	register('fileWorksets.autoAdd.off', () => setAutoAdd());
@@ -327,6 +355,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<FileWo
 		// The Delete key in the File Worksets list deletes selected worksets; file items are removed from their workset.
 		if (primary === LIST_VIEW_ID) {
 			let worksetIds = listView.selection.filter(isWorksetNode).map((n) => n.id);
+			let hasFiles = listView.selection.some(isFileNode);
+			if (worksetIds.length && hasFiles) {
+				void vscode.window.showInformationMessage(
+					'File Worksets: Select either worksets (to delete them) or files (to remove them), not both.',
+				);
+				return;
+			}
 			if (worksetIds.length) {
 				actions.deleteWorksets(worksetIds);
 				return;
@@ -427,8 +462,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<FileWo
 		),
 	);
 	register('fileWorksets.renameFile', (primary?: unknown) => {
+		// From a keybinding there's no clicked item, and the API doesn't expose the focused row,
+		// so rename only works on a single selected item.
+		let fromKey = primary === ACTIVE_VIEW_ID || primary === LIST_VIEW_ID;
+		let selection: readonly (TreeNode | ActiveNode)[] = primary === LIST_VIEW_ID ? listView.selection : activeView.selection;
+		if (fromKey && selection.length !== 1) {
+			if (selection.length > 1) {
+				void vscode.window.showInformationMessage('File Worksets: Select a single item to rename.');
+			}
+			return undefined;
+		}
 		// The rename key on a workset row in the File Worksets list renames the workset.
-		let [focused] = primary === LIST_VIEW_ID ? listView.selection : [];
+		let [focused] = primary === LIST_VIEW_ID ? selection : [];
 		if (isWorksetNode(focused)) {
 			return actions.renameWorkset(focused.id);
 		}
@@ -440,7 +485,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<FileWo
 	);
 
 	await store.useBackend(createBackend(context, roots));
+	pinRootlessEntries();
 	updateChrome();
+	void deletions.reconcile();
 
 	return { store, actions, activeFiles, worksets, activeView, listView, revealer, decorations };
 }

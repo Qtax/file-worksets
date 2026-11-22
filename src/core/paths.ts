@@ -4,18 +4,24 @@
  * `..` segments, so they cannot escape their workspace folder.
  */
 
-export function sanitizeRelativePath(input: unknown): string | undefined {
+/**
+ * Validates and normalizes a workspace-relative path.
+ *
+ * `backslashIsSeparator` is for stored or hand-written paths, where `\` may come from Windows. Paths taken
+ * from live URIs always use `/`, so a `\` there is part of a file name (legal on Linux and macOS) and kept.
+ */
+export function sanitizeRelativePath(input: unknown, backslashIsSeparator = true): string | undefined {
 	if (typeof input !== 'string') {
 		return undefined;
 	}
-	let path = input.replace(/\\/g, '/').replace(/\/{2,}/g, '/');
+	let path = (backslashIsSeparator ? input.replace(/\\/g, '/') : input).replace(/\/{2,}/g, '/');
 	while (path.startsWith('./')) {
 		path = path.slice(2);
 	}
 	if (path.endsWith('/')) {
 		path = path.slice(0, -1);
 	}
-	if (path === '' || path.startsWith('/') || /^[a-zA-Z]:/.test(path)) {
+	if (path === '' || path.startsWith('/') || (backslashIsSeparator && /^[a-zA-Z]:/.test(path))) {
 		return undefined;
 	}
 	if (path.split('/').some((segment) => segment === '.' || segment === '..')) {
@@ -35,11 +41,26 @@ export function relativeUriPath(rootPath: string, targetPath: string, ignoreCase
 	if (!comparableTarget.startsWith(`${comparableRoot}/`)) {
 		return undefined;
 	}
-	return sanitizeRelativePath(targetPath.slice(root.length + 1));
+	return sanitizeRelativePath(targetPath.slice(root.length + 1), false);
 }
 
 export function isSameOrUnder(path: string, ancestor: string): boolean {
 	return ancestor === '' || path === ancestor || path.startsWith(`${ancestor}/`);
+}
+
+/** `'a/b/c'` → `['', 'a', 'a/b', 'a/b/c']`, outermost first. */
+export function selfAndAncestors(path: string): string[] {
+	let result = [''];
+	if (path === '') {
+		return result;
+	}
+	let index = path.indexOf('/');
+	while (index !== -1) {
+		result.push(path.slice(0, index));
+		index = path.indexOf('/', index + 1);
+	}
+	result.push(path);
+	return result;
 }
 
 export function replacePrefix(path: string, from: string, to: string): string | undefined {

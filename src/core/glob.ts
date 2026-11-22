@@ -45,12 +45,25 @@ export function globToRegExp(glob: string): RegExp {
 	return new RegExp(`^${source}$`);
 }
 
-/** Compiles the enabled (boolean `true`) patterns of a `files.exclude`-style object. */
+/**
+ * Compiles the enabled (boolean `true`) patterns of a `files.exclude`-style object. Invalid patterns
+ * (e.g. an unclosed `{`) are skipped so one bad setting can't break the whole tree. Conditional
+ * patterns (`{ "when": "$(basename).ts" }`) aren't supported and are ignored.
+ */
 export function compileExcludes(config: Readonly<Record<string, unknown>> | undefined): RegExp[] {
 	if (!config) {
 		return [];
 	}
-	return Object.entries(config)
-		.filter(([, enabled]) => enabled === true)
-		.map(([pattern]) => globToRegExp(pattern));
+	let patterns: RegExp[] = [];
+	for (let [pattern, enabled] of Object.entries(config)) {
+		if (enabled !== true) {
+			continue;
+		}
+		try {
+			patterns.push(globToRegExp(pattern));
+		} catch {
+			// Skip invalid patterns.
+		}
+	}
+	return patterns;
 }

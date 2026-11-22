@@ -10,13 +10,14 @@ import {
 	sanitizeEntries,
 	serializeWorksets,
 	sortWorksets,
+	touchIndex,
 	validateWorksetName,
 	worksetLabel,
 	type Workset,
 	type WorksetEntry,
 } from '../../src/core/model.ts';
 import { relativeUriPath, replacePrefix, sanitizeRelativePath } from '../../src/core/paths.ts';
-import { buildTrie, compareTreeItems, findNode, listChildren, type SortItem, type SortOptions } from '../../src/core/tree.ts';
+import { buildTrie, compareTreeItems, findNode, listChildren, type LexicographicOrder, type SortItem, type SortOptions } from '../../src/core/tree.ts';
 
 let file = (path: string, root?: string): WorksetEntry => (root ? { kind: 'file', path, root } : { kind: 'file', path });
 let folder = (path: string, root?: string): WorksetEntry =>
@@ -29,6 +30,12 @@ describe('paths', () => {
 		for (let bad of ['', '/etc/passwd', 'C:\\Windows', 'c:/x', '../x', 'a/../../x', 'a/./b', 42]) {
 			assert.equal(sanitizeRelativePath(bad), undefined, String(bad));
 		}
+	});
+
+	test('paths from live URIs keep backslashes as part of the name (legal on Linux/macOS)', () => {
+		assert.equal(sanitizeRelativePath('dir/a\\b.txt', false), 'dir/a\\b.txt');
+		assert.equal(relativeUriPath('/repo', '/repo/dir/a\\b.txt', false), 'dir/a\\b.txt');
+		assert.equal(sanitizeRelativePath('../a\\b', false), undefined);
 	});
 
 	test('relativeUriPath handles drive-letter case on Windows-like paths', () => {
@@ -55,6 +62,18 @@ describe('model', () => {
 	test('roots: undefined means the default (first) folder', () => {
 		let result = addEntries([file('a.ts')], [file('a.ts', 'web'), file('a.ts', 'api')], 'web');
 		assert.deepEqual(result.added, [file('a.ts', 'api')]);
+	});
+
+	test('touchIndex matches entries, paths inside folder entries, and folders containing entries', () => {
+		let touches = touchIndex([file('src/a.ts'), folder('lib'), file('x.ts', 'api')], 'web');
+		for (let path of ['src/a.ts', 'src', 'lib', 'lib/deep/b.ts']) {
+			assert.equal(touches(undefined, path), true, path);
+		}
+		assert.equal(touches('web', 'src'), true);
+		for (let path of ['src/b.ts', 'srcx', 'libx/a.ts', 'x.ts']) {
+			assert.equal(touches(undefined, path), false, path);
+		}
+		assert.equal(touches('api', 'x.ts'), true);
 	});
 
 	test('removeUnder removes a subtree without touching siblings with similar names', () => {
@@ -117,6 +136,19 @@ describe('model', () => {
 		assert.equal(parsed[2]?.name, '', 'blank names are kept as unnamed worksets');
 		assert.throws(() => parseWorksets('{', () => 'x'));
 		assert.throws(() => parseWorksets('[]', () => 'x'));
+	});
+
+	test('parseWorksets refuses newer format versions so they are never overwritten', () => {
+		assert.throws(() => parseWorksets(JSON.stringify({ version: 2, worksets: [] }), () => 'x'), /version 2/);
+		assert.throws(() => parseWorksets(JSON.stringify({ version: '1', worksets: [] }), () => 'x'));
+		assert.deepEqual(parseWorksets(JSON.stringify({ version: 1, worksets: [] }), () => 'x'), []);
+		assert.deepEqual(parseWorksets(JSON.stringify({ worksets: [] }), () => 'x'), [], 'unversioned (hand-written) data is accepted');
+	});
+
+	test('parseWorksets can keep backslashes as part of names (non-Windows)', () => {
+		let text = JSON.stringify({ worksets: [{ name: 'A', files: ['dir\\a.ts'] }] });
+		assert.deepEqual(parseWorksets(text, () => 'x')[0]?.entries, [file('dir/a.ts')]);
+		assert.deepEqual(parseWorksets(text, () => 'x', { backslashIsSeparator: false })[0]?.entries, [file('dir\\a.ts')]);
 	});
 
 	test('sanitizeEntries validates drag-and-drop payloads', () => {
@@ -209,6 +241,18 @@ describe('tree', () => {
 		assert.deepEqual(sorted({ order: 'default', lexicographic: 'unicode' }), ['Docs', 'src', 'a.md', 'b.ts', 'file10.ts', 'file2.ts']);
 	});
 
+	test('upper/lower group by the case of the first letter, like VS Code', () => {
+		let names = ['a.ts', 'Z.ts', 'b.ts', 'C.ts'];
+		let sorted = (lexicographic: LexicographicOrder): string[] =>
+			names
+				.map((name): SortItem => ({ isDirectory: false, name }))
+				.sort((a, b) => compareTreeItems(a, b, { order: 'default', lexicographic }))
+				.map((i) => i.name);
+		assert.deepEqual(sorted('upper'), ['C.ts', 'Z.ts', 'a.ts', 'b.ts']);
+		assert.deepEqual(sorted('lower'), ['a.ts', 'b.ts', 'C.ts', 'Z.ts']);
+		assert.deepEqual(sorted('default'), ['a.ts', 'b.ts', 'C.ts', 'Z.ts']);
+	});
+
 	test('compacted folders sort by their first segment', () => {
 		let chains = buildTrie([file('b/only/x.ts'), file('a-b/y.ts'), file('a/z.ts')]);
 		assert.deepEqual(
@@ -240,5 +284,11 @@ describe('glob', () => {
 	test('compileExcludes ignores disabled and conditional patterns', () => {
 		let patterns = compileExcludes({ '**/.git': true, '**/*.js': { when: '$(basename).ts' }, '**/off': false });
 		assert.equal(patterns.length, 1);
+	});
+
+	test('compileExcludes skips invalid patterns instead of throwing', () => {
+		let patterns = compileExcludes({ '**/{a,b': true, '**/.git': true });
+		assert.equal(patterns.length, 1);
+		assert.ok(patterns[0]?.test('x/.git'));
 	});
 });

@@ -1,4 +1,4 @@
-import { compareNames, isSameOrUnder, replacePrefix, sanitizeRelativePath } from './paths.ts';
+import { compareNames, isSameOrUnder, replacePrefix, sanitizeRelativePath, selfAndAncestors } from './paths.ts';
 
 export type EntryKind = 'file' | 'folder';
 
@@ -48,6 +48,12 @@ export function isCovered(
 	});
 }
 
+/** Map/set key for a path in a root; entries without a root use `defaultRoot`. */
+export function pathKey(root: string | undefined, path: string, defaultRoot: string | undefined): string {
+	return `${root ?? defaultRoot ?? ''}\0${path}`;
+}
+
+/** Same result as checking `isCovered` for each addition, but indexed so large batches stay linear. */
 export function addEntries(
 	entries: readonly WorksetEntry[],
 	additions: readonly WorksetEntry[],
@@ -55,13 +61,44 @@ export function addEntries(
 ): { entries: WorksetEntry[]; added: WorksetEntry[] } {
 	let result = [...entries];
 	let added: WorksetEntry[] = [];
+	let files = new Set<string>();
+	let folders = new Set<string>();
+	let index = (entry: WorksetEntry): void => {
+		(entry.kind === 'folder' ? folders : files).add(pathKey(entry.root, entry.path, defaultRoot));
+	};
+	entries.forEach(index);
 	for (let addition of additions) {
-		if (!isCovered(result, addition, defaultRoot)) {
+		let covered =
+			(addition.kind === 'file' && files.has(pathKey(addition.root, addition.path, defaultRoot))) ||
+			selfAndAncestors(addition.path).some((path) => folders.has(pathKey(addition.root, path, defaultRoot)));
+		if (!covered) {
 			result.push(addition);
 			added.push(addition);
+			index(addition);
 		}
 	}
 	return { entries: result, added };
+}
+
+/**
+ * Builds a lookup for "does this path touch any entry", i.e. is it an entry, inside a folder entry,
+ * or a folder that contains an entry. Lookups cost O(path depth) instead of O(entries).
+ */
+export function touchIndex(
+	entries: Iterable<WorksetEntry>,
+	defaultRoot: string | undefined,
+): (root: string | undefined, path: string) => boolean {
+	let exact = new Set<string>();
+	let containing = new Set<string>();
+	for (let entry of entries) {
+		exact.add(pathKey(entry.root, entry.path, defaultRoot));
+		for (let path of selfAndAncestors(entry.path)) {
+			containing.add(pathKey(entry.root, path, defaultRoot));
+		}
+	}
+	return (root, path) =>
+		containing.has(pathKey(root, path, defaultRoot)) ||
+		selfAndAncestors(path).some((ancestor) => exact.has(pathKey(root, ancestor, defaultRoot)));
 }
 
 /** Removes every entry at or below `path` (`''` means the whole root). */
@@ -221,19 +258,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function parseStoredPaths(value: unknown, kind: EntryKind): WorksetEntry[] {
+function parseStoredPaths(value: unknown, kind: EntryKind, backslashIsSeparator: boolean): WorksetEntry[] {
 	if (!Array.isArray(value)) {
 		return [];
 	}
 	let entries: WorksetEntry[] = [];
 	for (let item of value) {
 		if (typeof item === 'string') {
-			let path = sanitizeRelativePath(item);
+			let path = sanitizeRelativePath(item, backslashIsSeparator);
 			if (path) {
 				entries.push(makeEntry(kind, path, undefined));
 			}
 		} else if (isRecord(item) && typeof item.root === 'string' && item.root) {
-			let path = sanitizeRelativePath(item.path);
+			let path = sanitizeRelativePath(item.path, backslashIsSeparator);
 			if (path) {
 				entries.push(makeEntry(kind, path, item.root));
 			}
@@ -242,7 +279,7 @@ function parseStoredPaths(value: unknown, kind: EntryKind): WorksetEntry[] {
 	return entries;
 }
 
-/** Validates entries from untrusted input (e.g. drag-and-drop payloads). */
+/** Validates entries from untrusted input (e.g. drag-and-drop payloads, which always use `/`). */
 export function sanitizeEntries(value: unknown): WorksetEntry[] {
 	if (!Array.isArray(value)) {
 		return [];
@@ -252,7 +289,7 @@ export function sanitizeEntries(value: unknown): WorksetEntry[] {
 		if (!isRecord(item) || (item.kind !== 'file' && item.kind !== 'folder')) {
 			continue;
 		}
-		let path = sanitizeRelativePath(item.path);
+		let path = sanitizeRelativePath(item.path, false);
 		let root = typeof item.root === 'string' && item.root ? item.root : undefined;
 		if (path) {
 			entries.push(makeEntry(item.kind, path, root));
@@ -261,14 +298,24 @@ export function sanitizeEntries(value: unknown): WorksetEntry[] {
 	return dedupeEntries(entries);
 }
 
+export interface ParseOptions {
+	/** Treat `\` in stored paths as a separator (hand-edited files on Windows). */
+	readonly backslashIsSeparator?: boolean;
+}
+
 /**
  * Parses stored worksets, dropping anything malformed or unsafe.
- * Throws when the text is not JSON or lacks a `worksets` array.
+ * Throws when the text is not JSON, lacks a `worksets` array, or was written by a newer,
+ * unsupported format version (so it's never overwritten with a downgraded copy).
  */
-export function parseWorksets(text: string, newId: () => string): Workset[] {
+export function parseWorksets(text: string, newId: () => string, options: ParseOptions = {}): Workset[] {
+	let backslashIsSeparator = options.backslashIsSeparator ?? true;
 	let data: unknown = JSON.parse(text);
 	if (!isRecord(data) || !Array.isArray(data.worksets)) {
 		throw new Error('expected an object with a "worksets" array');
+	}
+	if (data.version !== undefined && (typeof data.version !== 'number' || data.version > STORAGE_VERSION)) {
+		throw new Error(`unsupported format version ${String(data.version)}; update the File Worksets extension`);
 	}
 	let ids = new Set<string>();
 	let result: Workset[] = [];
@@ -287,7 +334,10 @@ export function parseWorksets(text: string, newId: () => string): Workset[] {
 			typeof raw.createdAt === 'string' && !Number.isNaN(Date.parse(raw.createdAt))
 				? raw.createdAt
 				: new Date(0).toISOString();
-		let entries = dedupeEntries([...parseStoredPaths(raw.files, 'file'), ...parseStoredPaths(raw.folders, 'folder')]);
+		let entries = dedupeEntries([
+			...parseStoredPaths(raw.files, 'file', backslashIsSeparator),
+			...parseStoredPaths(raw.folders, 'folder', backslashIsSeparator),
+		]);
 		result.push({ id, name, createdAt, entries });
 	}
 	return result;

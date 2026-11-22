@@ -1,14 +1,17 @@
 import assert from 'node:assert/strict';
 import * as vscode from 'vscode';
 import type { FileWorksetsApi } from '../../src/extension.ts';
+import { serializeWorksets } from '../../src/core/model.ts';
 import type { FileNode } from '../../src/fileTree.ts';
+import { FileStorageBackend, type StorageBackend } from '../../src/storage.ts';
 
 suite('File Worksets', () => {
 	let api: FileWorksetsApi;
 	let root: vscode.Uri;
 
 	let uri = (path: string): vscode.Uri => vscode.Uri.joinPath(root, ...path.split('/'));
-	let children = async (parent?: FileNode): Promise<FileNode[]> => api.activeFiles.getChildren(parent);
+	let children = async (parent?: FileNode): Promise<FileNode[]> =>
+		(await api.activeFiles.getChildren(parent)).filter((n): n is FileNode => n.kind === 'file-node');
 	let labels = async (parent?: FileNode): Promise<string[]> => (await children(parent)).map((n) => n.label);
 	let child = async (parent: FileNode | undefined, label: string): Promise<FileNode> => {
 		let node = (await children(parent)).find((n) => n.label === label);
@@ -166,6 +169,8 @@ suite('File Worksets', () => {
 		await waitFor(() => activePaths().includes('file:test/c.test.ts'), 'rename to update the reference');
 		assert.ok(await exists(uri('test/c.test.ts')));
 
+		// Close the files the test opened, so deleting doesn't have to wait for open editors.
+		await vscode.commands.executeCommand('workbench.action.closeAllEditors');
 		assert.equal(await api.actions.deleteOnDisk([await child(testFolder, 'c.test.ts')], false), 1);
 		assert.ok(!(await exists(uri('test/c.test.ts'))));
 		await waitFor(() => !activePaths().includes('file:test/c.test.ts'), 'reference to be removed from the workset');
@@ -237,7 +242,10 @@ suite('File Worksets', () => {
 	});
 
 	test('selects the active editor in Workset Files, following explorer.autoReveal settings', async () => {
-		let selected = (): string | undefined => api.activeView.selection[0]?.path;
+		let selected = (): string | undefined => {
+			let [node] = api.activeView.selection;
+			return node?.kind === 'file-node' ? node.path : undefined;
+		};
 		let sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 		let explorer = (): vscode.WorkspaceConfiguration => vscode.workspace.getConfiguration('explorer');
 		await vscode.commands.executeCommand('fileWorksets.files.focus');
@@ -263,6 +271,24 @@ suite('File Worksets', () => {
 			await explorer().update('autoRevealExclude', undefined, vscode.ConfigurationTarget.Global);
 			await vscode.commands.executeCommand('workbench.action.closeAllEditors');
 		}
+	});
+
+	test('a change made right after an outside edit never overwrites that edit', async () => {
+		await api.store.flush();
+		let file = uri('.vscode/file-worksets.json');
+		let data = JSON.parse(new TextDecoder().decode(await vscode.workspace.fs.readFile(file)));
+		data.worksets.push({ id: 'concurrent1', name: 'Concurrent', files: ['src/a.ts'] });
+		await vscode.workspace.fs.writeFile(file, new TextEncoder().encode(JSON.stringify(data)));
+		// Change something before the file watcher has reloaded the outside edit.
+		let active = api.store.active;
+		assert.ok(active);
+		api.store.addEntries(active.id, [{ kind: 'file', path: 'docs/readme.md' }], true);
+		await api.store.flush();
+
+		await waitFor(() => api.store.all.some((w) => w.name === 'Concurrent'), 'the outside edit to be loaded');
+		await api.store.flush();
+		let onDisk = new TextDecoder().decode(await vscode.workspace.fs.readFile(file));
+		assert.match(onDisk, /"Concurrent"/, 'the outside edit is still in the file');
 	});
 
 	test('restoring an older version of the storage file externally is picked up', async () => {
@@ -310,6 +336,41 @@ suite('File Worksets', () => {
 		}
 	});
 
+	test('deleting a folder records its references; each comes back only when its own path reappears', async () => {
+		let previous = api.store.active?.id;
+		let dir = uri('src/gone');
+		let [a, b] = [uri('src/gone/a.ts'), uri('src/gone/b.ts')];
+		await vscode.workspace.fs.writeFile(a, new TextEncoder().encode('// a'));
+		await vscode.workspace.fs.writeFile(b, new TextEncoder().encode('// b'));
+		let id: string | undefined;
+		try {
+			await vscode.commands.executeCommand('fileWorksets.createWorkset', 'Folder Delete');
+			id = api.store.active?.id;
+			assert.ok(id);
+			let worksetId = id;
+			await vscode.commands.executeCommand('fileWorksets.addToActiveWorkset', a, [a, b]);
+			let paths = (): string[] => (api.store.get(worksetId)?.entries ?? []).map((e) => e.path).sort();
+			assert.deepEqual(paths(), ['src/gone/a.ts', 'src/gone/b.ts']);
+
+			let edit = new vscode.WorkspaceEdit();
+			edit.deleteFile(dir, { recursive: true });
+			assert.ok(await vscode.workspace.applyEdit(edit));
+			await waitFor(() => paths().length === 0, 'folder contents to be removed');
+
+			await vscode.workspace.fs.writeFile(a, new TextEncoder().encode('// a'));
+			await waitFor(() => paths().length === 1, 'recreated file to be re-added');
+			assert.deepEqual(paths(), ['src/gone/a.ts']);
+		} finally {
+			await vscode.workspace.fs.delete(dir, { recursive: true, useTrash: false }).then(undefined, () => undefined);
+			if (id) {
+				api.store.delete(id);
+			}
+			if (previous) {
+				api.store.setActive(previous);
+			}
+		}
+	});
+
 	test('no active workset: deactivating leaves all worksets untouched while editing', async () => {
 		let previous = api.store.active?.id;
 		assert.ok(previous);
@@ -320,6 +381,8 @@ suite('File Worksets', () => {
 			assert.equal(activeId(), undefined);
 			assert.equal(api.activeView.title, 'Workset Files');
 			assert.deepEqual(await children(), []);
+			let rows = (await api.activeFiles.getChildren()).map((n) => api.activeFiles.getTreeItem(n).command?.command);
+			assert.deepEqual(rows, [undefined, undefined, 'fileWorksets.addActiveEditor', 'fileWorksets.addOpenEditors']);
 
 			// Auto-add defaults to edited files; with no active workset nothing may change.
 			let before = snapshot();
@@ -336,12 +399,50 @@ suite('File Worksets', () => {
 			assert.match(api.activeView.title ?? '', /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
 			assert.deepEqual(created.entries.map((e) => e.path), ['src/a.ts']);
 			api.actions.deleteWorksets([created.id]);
+
+			// With no active workset the view shows rows instead of welcome content, so it accepts drops
+			// everywhere (including on the hint row); dropping creates a new workset.
+			assert.equal(activeId(), undefined);
+			let [hint] = await api.activeFiles.getChildren();
+			assert.ok(hint);
+			let drop = new vscode.DataTransfer();
+			drop.set('text/uri-list', new vscode.DataTransferItem(uri('src/lib/b.ts').toString()));
+			await api.activeFiles.handleDrop(hint, drop);
+			let dropped = api.store.active;
+			assert.ok(dropped && dropped.id !== previous);
+			assert.deepEqual(dropped.entries.map((e) => e.path), ['src/lib/b.ts']);
+			api.actions.deleteWorksets([dropped.id]);
 		} finally {
 			await vscode.commands.executeCommand('workbench.action.files.revert');
 			await vscode.commands.executeCommand('workbench.action.closeAllEditors');
 			await vscode.commands.executeCommand('fileWorksets.activateWorkset', previous);
 		}
 		assert.equal(activeId(), previous);
+	});
+
+	test('an empty workset shows droppable hint rows; Delete Workset in the view menu deletes the active one', async () => {
+		let previous = api.store.active?.id;
+		try {
+			await vscode.commands.executeCommand('fileWorksets.createWorkset', 'Empty Drop');
+			let empty = api.store.active;
+			assert.ok(empty && empty.entries.length === 0);
+			let rows = await api.activeFiles.getChildren();
+			assert.match(String(api.activeFiles.getTreeItem(rows[0]!).label), /This workset is empty/);
+
+			let drop = new vscode.DataTransfer();
+			drop.set('text/uri-list', new vscode.DataTransferItem(uri('src/a.ts').toString()));
+			await api.activeFiles.handleDrop(rows[1], drop);
+			assert.deepEqual(api.store.get(empty.id)?.entries.map((e) => e.path), ['src/a.ts']);
+			assert.deepEqual(await labels(), ['src']);
+
+			await vscode.commands.executeCommand('fileWorksets.deleteActiveWorkset');
+			assert.equal(api.store.get(empty.id), undefined);
+			assert.equal(api.store.active, undefined);
+		} finally {
+			if (previous) {
+				api.store.setActive(previous);
+			}
+		}
 	});
 
 	test('marks files of the active workset in the Explorer (tint by default, folder entry itself only)', async () => {
@@ -431,6 +532,48 @@ suite('File Worksets', () => {
 			if (previous) {
 				api.store.setActive(previous);
 			}
+		}
+	});
+
+	test('overlapping storage switches: only the newest one loads, migrates and unblocks changes', async () => {
+		let folder = vscode.workspace.workspaceFolders?.[0];
+		assert.ok(folder);
+		let fake = (content: string | undefined, delayMs: number): StorageBackend & { writes: string[]; reading: Promise<void> } => {
+			let writes: string[] = [];
+			let started = (): void => undefined;
+			let reading = new Promise<void>((resolve) => (started = resolve));
+			return {
+				description: 'fake storage',
+				writes,
+				reading,
+				onDidChangeExternally: () => ({ dispose: () => undefined }),
+				read: async () => {
+					started();
+					await new Promise((resolve) => setTimeout(resolve, delayMs));
+					return content;
+				},
+				write: async (text) => void writes.push(text),
+				dispose: () => undefined,
+			};
+		};
+		let stored = serializeWorksets([{ id: 'fast00000000', name: 'Fast', createdAt: new Date().toISOString(), entries: [] }]);
+		let slow = fake(undefined, 300);
+		let fast = fake(stored, 0);
+		try {
+			await api.store.settled();
+			assert.ok(api.store.all.length > 0, 'needs worksets that an older switch could migrate');
+			let first = api.store.useBackend(slow, { rootlessOwner: undefined });
+			// Switch again while the slow read is in progress.
+			await slow.reading;
+			let second = api.store.useBackend(fast);
+			await Promise.all([first, second]);
+			await api.store.settled();
+			assert.deepEqual(api.store.all.map((w) => w.name), ['Fast']);
+			assert.equal(api.store.changeable, true);
+			assert.deepEqual(slow.writes, []);
+			assert.deepEqual(fast.writes, [], 'the older switch must not migrate into the newer storage');
+		} finally {
+			await api.store.useBackend(new FileStorageBackend(folder));
 		}
 	});
 });

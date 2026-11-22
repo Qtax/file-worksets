@@ -1,7 +1,10 @@
+import { realpath } from 'node:fs/promises';
+import { sep } from 'node:path';
 import * as vscode from 'vscode';
 import {
 	coveringFolder,
 	formatRelativeTime,
+	isCovered,
 	makeEntry,
 	removeUnder,
 	sameRoot,
@@ -90,7 +93,9 @@ export class WorksetActions {
 			return undefined;
 		}
 		let workset = this.store.create(name, entries);
-		vscode.window.setStatusBarMessage(`$(add) Created workset "${worksetLabel(workset)}". Press F2 in the list to rename it.`, 4000);
+		if (workset) {
+			vscode.window.setStatusBarMessage(`$(add) Created workset "${worksetLabel(workset)}". Press F2 in the list to rename it.`, 4000);
+		}
 		return workset;
 	}
 
@@ -307,11 +312,16 @@ export class WorksetActions {
 			void vscode.window.showInformationMessage('File Worksets: Nothing to add. Select a file in the Explorer or open an editor.');
 			return [];
 		}
+		// Resolve first, so a new workset isn't created when there's nothing usable to add.
+		let { entries, skipped } = await this.entriesFromUris(uris);
+		if (entries.length === 0) {
+			this.reportSkipped(skipped);
+			return [];
+		}
 		let workset = target ?? (await this.ensureActive());
 		if (!workset) {
 			return [];
 		}
-		let { entries, skipped } = await this.entriesFromUris(uris);
 		let added = this.store.addEntries(workset.id, entries);
 		this.reportAdded(workset, added.length, entries.length - added.length, skipped);
 		return added;
@@ -365,18 +375,29 @@ export class WorksetActions {
 			return;
 		}
 		let sourceIds = new Set(nodes.map((n) => n.worksetId));
-		let target = await this.pickWorkset({
+		let picked = await this.pickWorkset({
 			placeHolder: move ? 'Move to workset' : 'Copy to workset',
 			excludeId: sourceIds.size === 1 ? [...sourceIds][0] : undefined,
 			allowCreate: true,
 		});
+		// The worksets may have changed while the picker was open (e.g. reloaded from disk).
+		let target = picked && this.store.get(picked.id);
 		if (!target) {
 			return;
 		}
 		await this.addNodes(nodes, target);
-		if (move) {
-			await this.removeNodes(nodes.filter((n) => n.worksetId !== target.id));
+		if (!move) {
+			return;
 		}
+		// Only remove what's now actually in the target, so a failed add never loses references.
+		let defaultRoot = this.roots.defaultRoot();
+		let targetEntries = this.store.get(target.id)?.entries ?? [];
+		let movable = nodes.filter(
+			(n) =>
+				n.worksetId !== target.id &&
+				this.entriesFromNodes([n]).every((entry) => isCovered(targetEntries, entry, defaultRoot)),
+		);
+		await this.removeNodes(movable);
 	}
 
 	/** Removes references without asking; never touches files on disk. */
@@ -443,23 +464,27 @@ export class WorksetActions {
 	}
 
 	async removeMissing(workset: Workset): Promise<number> {
-		let kept: WorksetEntry[] = [];
+		// Only entries confirmed missing (not, e.g., unreadable) are removed, and they're removed from the
+		// workset's current entries so additions made during the check aren't lost.
+		let missing = new Set<WorksetEntry>();
 		for (let entry of workset.entries) {
 			let uri = this.roots.uriFor(entry.root, entry.path);
 			if (!uri) {
-				kept.push(entry);
 				continue;
 			}
 			try {
 				await vscode.workspace.fs.stat(uri);
-				kept.push(entry);
-			} catch {
-				// missing: drop it
+			} catch (error) {
+				if (error instanceof vscode.FileSystemError && error.code === 'FileNotFound') {
+					missing.add(entry);
+				}
 			}
 		}
-		let removed = workset.entries.length - kept.length;
-		if (removed) {
-			this.store.setEntries(workset.id, kept);
+		let current = this.store.get(workset.id);
+		let kept = current?.entries.filter((e) => !missing.has(e)) ?? [];
+		let removed = current ? current.entries.length - kept.length : 0;
+		if (current && removed) {
+			this.store.setEntries(current.id, kept);
 		}
 		void vscode.window.showInformationMessage(
 			removed
@@ -513,6 +538,12 @@ export class WorksetActions {
 			return undefined;
 		}
 		let target = joinPath(parent.uri, relative);
+		if (!(await this.isInsideWorkspace(parent.uri, parent.root))) {
+			void vscode.window.showWarningMessage(
+				`File Worksets: "${parent.path}" is reached through a link that points outside the workspace folder.`,
+			);
+			return undefined;
+		}
 		if (kind === 'file') {
 			let edit = new vscode.WorkspaceEdit();
 			edit.createFile(target, { overwrite: false, ignoreIfExists: false });
@@ -561,6 +592,10 @@ export class WorksetActions {
 			void vscode.window.showErrorMessage(error);
 			return false;
 		}
+		let [checked] = await this.verifiedOnDisk([node]);
+		if (!checked) {
+			return false;
+		}
 		let edit = new vscode.WorkspaceEdit();
 		edit.renameFile(node.uri, joinPath(parentUri, name), { overwrite: false });
 		let ok = await vscode.workspace.applyEdit(edit);
@@ -571,8 +606,8 @@ export class WorksetActions {
 	}
 
 	/**
-	 * Deletes files or folders from disk (to the trash if `files.enableTrash` is on) and drops
-	 * their references from the workset they were deleted from. Other worksets keep them as missing.
+	 * Deletes files or folders from disk (to the trash if `files.enableTrash` is on). Like any delete
+	 * done in VS Code, DeletionTracker then removes their references from all worksets.
 	 */
 	async deleteOnDisk(nodes: readonly FileNode[], confirm = true): Promise<number> {
 		let defaultRoot = this.roots.defaultRoot();
@@ -585,7 +620,7 @@ export class WorksetActions {
 						other.path !== n.path && sameRoot(other.root, n.root, defaultRoot) && isSameOrUnder(n.path, other.path),
 				),
 		);
-		let unique = [...new Map(targets.map((n) => [n.uri.toString(), n])).values()];
+		let unique = await this.verifiedOnDisk([...new Map(targets.map((n) => [n.uri.toString(), n])).values()]);
 		let [first] = unique;
 		if (!first) {
 			return 0;
@@ -607,10 +642,16 @@ export class WorksetActions {
 			if (answer !== button) {
 				return 0;
 			}
+			// Things may have changed while the dialog was open.
+			unique = await this.verifiedOnDisk(unique);
+			if (unique.length === 0) {
+				return 0;
+			}
 		}
 		let edit = new vscode.WorkspaceEdit();
 		for (let node of unique) {
-			edit.deleteFile(node.uri, { recursive: true, ignoreIfNotExists: true });
+			// Recursive only for folders the user saw as folders.
+			edit.deleteFile(node.uri, { recursive: node.isDirectory, ignoreIfNotExists: true });
 		}
 		// References are removed from all worksets by DeletionTracker (onDidDeleteFiles).
 		if (!(await vscode.workspace.applyEdit(edit))) {
@@ -620,6 +661,71 @@ export class WorksetActions {
 		return unique.length;
 	}
 
+	/**
+	 * Keeps only items that still match the disk (same file/folder type as shown) and are safely inside
+	 * their workspace folder. Explains the first problem found.
+	 */
+	private async verifiedOnDisk(nodes: readonly FileNode[]): Promise<FileNode[]> {
+		let problems: string[] = [];
+		let ok: FileNode[] = [];
+		for (let node of nodes) {
+			let problem = await this.checkOnDisk(node);
+			if (problem) {
+				problems.push(problem);
+			} else {
+				ok.push(node);
+			}
+		}
+		if (problems[0]) {
+			void vscode.window.showWarningMessage(
+				`File Worksets: ${problems[0]}${problems.length > 1 ? ` (and ${problems.length - 1} more)` : ''}`,
+			);
+		}
+		return ok;
+	}
+
+	private async checkOnDisk(node: FileNode): Promise<string | undefined> {
+		let stat: vscode.FileStat;
+		try {
+			stat = await vscode.workspace.fs.stat(node.uri);
+		} catch {
+			return `"${node.path}" no longer exists.`;
+		}
+		let isDirectory = (stat.type & vscode.FileType.Directory) !== 0;
+		if (isDirectory !== node.isDirectory) {
+			return `"${node.path}" changed on disk and is now a ${isDirectory ? 'folder' : 'file'}. Refresh and try again.`;
+		}
+		if (!(await this.isInsideWorkspace(vscode.Uri.joinPath(node.uri, '..'), node.root))) {
+			return `"${node.path}" is reached through a link that points outside the workspace folder.`;
+		}
+		return undefined;
+	}
+
+	/**
+	 * Whether an existing directory really is inside the workspace folder, after resolving symlinks and
+	 * junctions. Stored paths are checked to stay inside lexically; this catches links pointing outside.
+	 * Only local files can be checked; other file systems are trusted.
+	 */
+	private async isInsideWorkspace(directory: vscode.Uri, root: string | undefined): Promise<boolean> {
+		let folder = this.roots.resolve(root);
+		if (!folder) {
+			return false;
+		}
+		if (directory.scheme !== 'file' || folder.uri.scheme !== 'file') {
+			return true;
+		}
+		try {
+			let [base, target] = await Promise.all([realpath(folder.uri.fsPath), realpath(directory.fsPath)]);
+			let normalize = (p: string): string =>
+				process.platform === 'win32' || process.platform === 'darwin' ? p.toLowerCase() : p;
+			let baseKey = normalize(base.endsWith(sep) ? base.slice(0, -1) : base);
+			let targetKey = normalize(target);
+			return targetKey === baseKey || targetKey.startsWith(baseKey + sep);
+		} catch {
+			return false;
+		}
+	}
+
 	/** Feedback for drops that change nothing, since VS Code can't show "not allowed" while dragging. */
 	reportAlreadyIn(workset: Workset | undefined): void {
 		if (workset) {
@@ -627,11 +733,19 @@ export class WorksetActions {
 		}
 	}
 
-	private reportAdded(workset: Workset, added: number, existing: number, skipped: number): void {
+	private reportSkipped(skipped: number): void {
 		if (skipped) {
 			void vscode.window.showWarningMessage(
 				`File Worksets: Skipped ${plural(skipped, 'item')} outside the workspace folders or not found on disk.`,
 			);
+		}
+	}
+
+	private reportAdded(workset: Workset, added: number, existing: number, skipped: number): void {
+		this.reportSkipped(skipped);
+		if (!this.store.changeable) {
+			// The store already explained why nothing was added.
+			return;
 		}
 		if (!added) {
 			if (existing) {

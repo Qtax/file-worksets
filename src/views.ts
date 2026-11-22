@@ -79,8 +79,44 @@ async function urisFrom(dataTransfer: vscode.DataTransfer): Promise<vscode.Uri[]
 	return uris;
 }
 
+/**
+ * A row shown when no workset is active or it's empty. Welcome content and `TreeView.message` aren't
+ * drop targets (welcome content even hides the tree), so the hint and its buttons are tree rows instead.
+ */
+export interface ActionNode {
+	readonly kind: 'action';
+	readonly id: string;
+	/** Empty for hint rows: VS Code dims the description, and labels can't be colored. */
+	readonly label: string;
+	readonly icon: string;
+	readonly command?: string;
+	readonly description?: string;
+	readonly tooltip?: string;
+}
+
+export type ActiveNode = FileNode | ActionNode;
+
+const NO_ACTIVE_TOOLTIP = 'No workset is active. Drop files or folders here, or add them from the Explorer, to create a new workset.';
+const EMPTY_TOOLTIP = 'This workset is empty. Drop files or folders here, or add them from the Explorer right-click menu.';
+const ADD_ACTIONS: readonly ActionNode[] = [
+	{ kind: 'action', id: 'add-active', command: 'fileWorksets.addActiveEditor', label: 'Add Active Editor', icon: 'add' },
+	{ kind: 'action', id: 'add-open', command: 'fileWorksets.addOpenEditors', label: 'Add All Open Editors', icon: 'files' },
+];
+const NO_ACTIVE_ACTIONS: readonly ActionNode[] = [
+	// Thin space (U+2009) used to align the text with description row under it (fragile and probably font dependent :-/ )
+	{ kind: 'action', id: 'hint', label: '  No active workset', description: '', tooltip: NO_ACTIVE_TOOLTIP, icon: 'info' },
+	{ kind: 'action', id: 'hint-drop', label: '', description: 'Drop files here to create one', tooltip: NO_ACTIVE_TOOLTIP, icon: 'blank' },
+	...ADD_ACTIONS,
+];
+const EMPTY_ACTIONS: readonly ActionNode[] = [
+	// Thin space (U+2009) used to align the text with description row under it (fragile and probably font dependent :-/ )
+	{ kind: 'action', id: 'empty-hint', label: '  This workset is empty', description: '', tooltip: EMPTY_TOOLTIP, icon: 'info' },
+	{ kind: 'action', id: 'empty-hint-drop', label: '', description: 'Drop files here to add them', tooltip: EMPTY_TOOLTIP, icon: 'blank' },
+	...ADD_ACTIONS,
+];
+
 /** "Workset Files": the files of the active workset, grouped by folder like the Explorer. */
-export class ActiveFilesProvider implements vscode.TreeDataProvider<FileNode>, vscode.TreeDragAndDropController<FileNode> {
+export class ActiveFilesProvider implements vscode.TreeDataProvider<ActiveNode>, vscode.TreeDragAndDropController<ActiveNode> {
 	readonly dropMimeTypes = [ENTRIES_MIME, URI_LIST];
 	readonly dragMimeTypes = [ENTRIES_MIME, URI_LIST];
 	private readonly emitter = new vscode.EventEmitter<void>();
@@ -104,36 +140,55 @@ export class ActiveFilesProvider implements vscode.TreeDataProvider<FileNode>, v
 		this.emitter.fire();
 	}
 
-	getTreeItem(node: FileNode): vscode.TreeItem {
+	getTreeItem(node: ActiveNode): vscode.TreeItem {
+		if (!isFileNode(node)) {
+			let item = new vscode.TreeItem(node.label, vscode.TreeItemCollapsibleState.None);
+			item.id = `action:${node.id}`;
+			item.iconPath = new vscode.ThemeIcon(node.icon);
+			item.description = node.description;
+			item.tooltip = node.tooltip;
+			if (node.command) {
+				item.command = { command: node.command, title: node.label };
+			}
+			item.contextValue = 'action';
+			return item;
+		}
 		return this.tree.toTreeItem(node);
 	}
 
-	async getChildren(node?: FileNode): Promise<FileNode[]> {
+	async getChildren(node?: ActiveNode): Promise<ActiveNode[]> {
+		if (node && !isFileNode(node)) {
+			return [];
+		}
+		let children: ActiveNode[] = await this.children(node);
+		if (!node && children.length === 0 && this.store.hasStorage) {
+			children = [...(this.store.active ? EMPTY_ACTIONS : NO_ACTIVE_ACTIONS)];
+		}
+		// Only VS Code's own requests count as "loaded"; internal lookups (auto-reveal) don't render anything.
+		if (!node && !this.loaded) {
+			this.loaded = true;
+			markLoaded('fileWorksets.filesLoaded');
+		}
+		return children;
+	}
+
+	private async children(node?: FileNode): Promise<FileNode[]> {
 		// While loading, VS Code shows its progress bar instead of the empty-view message.
-		await this.store.ready;
+		await this.store.whenLoaded();
 		let active = this.store.active;
 		if (!active) {
-			this.markRootLoaded(node);
 			return [];
 		}
 		let children = await this.tree.getChildren('active', active.id, node);
 		for (let child of children) {
 			this.parents.set(nodeId(child), node);
 		}
-		this.markRootLoaded(node);
 		return children;
 	}
 
-	private markRootLoaded(node: FileNode | undefined): void {
-		if (!node && !this.loaded) {
-			this.loaded = true;
-			markLoaded('fileWorksets.filesLoaded');
-		}
-	}
-
 	/** Required by `TreeView.reveal`. Parents are recorded as children are listed. */
-	getParent(node: FileNode): FileNode | undefined {
-		return this.parents.get(nodeId(node));
+	getParent(node: ActiveNode): FileNode | undefined {
+		return isFileNode(node) ? this.parents.get(nodeId(node)) : undefined;
 	}
 
 	/**
@@ -149,7 +204,7 @@ export class ActiveFilesProvider implements vscode.TreeDataProvider<FileNode>, v
 				: sameRoot(child.root, location.root, defaultRoot) && isSameOrUnder(location.path, child.path);
 		let parent: FileNode | undefined;
 		while (true) {
-			let next = (await this.getChildren(parent)).find(matches);
+			let next = (await this.children(parent)).find(matches);
 			if (!next || (next.origin !== 'root' && next.path === location.path)) {
 				return next;
 			}
@@ -160,16 +215,22 @@ export class ActiveFilesProvider implements vscode.TreeDataProvider<FileNode>, v
 		}
 	}
 
-	handleDrag(source: readonly FileNode[], dataTransfer: vscode.DataTransfer): void {
-		setDragData(source, dataTransfer, this.actions);
+	handleDrag(source: readonly ActiveNode[], dataTransfer: vscode.DataTransfer): void {
+		let files = source.filter(isFileNode);
+		if (files.length) {
+			setDragData(files, dataTransfer, this.actions);
+		}
 	}
 
-	async handleDrop(_target: FileNode | undefined, dataTransfer: vscode.DataTransfer): Promise<void> {
+	async handleDrop(_target: ActiveNode | undefined, dataTransfer: vscode.DataTransfer): Promise<void> {
 		let payload = await payloadFrom(dataTransfer);
 		if (payload) {
 			let activeId = this.store.active?.id;
-			if (payload.sources.every((id) => id === activeId)) {
+			if (payload.sources.length > 0 && payload.sources.every((id) => id === activeId)) {
 				this.actions.reportAlreadyIn(this.store.active);
+				return;
+			}
+			if (payload.entries.length === 0) {
 				return;
 			}
 			let workset = await this.actions.ensureActive();
@@ -228,9 +289,6 @@ export class WorksetsProvider implements vscode.TreeDataProvider<TreeNode>, vsco
 		if (workset) {
 			let tooltip = new vscode.MarkdownString();
 			tooltip.appendMarkdown(`**${name.replace(/[\\`*_{}[\]()#+\-.!|<>]/g, '\\$&')}**${isActive ? ' (active)' : ''}\n\n`);
-			if (!workset.name) {
-				tooltip.appendMarkdown('Unnamed. Press F2 or right-click to rename.  \n');
-			}
 			tooltip.appendMarkdown(`${describeWorkset(workset)}  \n`);
 			tooltip.appendMarkdown(`Created ${formatRelativeTime(workset.createdAt)}  \n`);
 			tooltip.appendMarkdown(`Last used ${formatRelativeTime(this.store.lastUsedTimes[workset.id])}`);
@@ -243,7 +301,7 @@ export class WorksetsProvider implements vscode.TreeDataProvider<TreeNode>, vsco
 	}
 
 	async getChildren(node?: TreeNode): Promise<TreeNode[]> {
-		await this.store.ready;
+		await this.store.whenLoaded();
 		if (!node) {
 			if (!this.loaded) {
 				this.loaded = true;
@@ -263,7 +321,7 @@ export class WorksetsProvider implements vscode.TreeDataProvider<TreeNode>, vsco
 	async handleDrop(target: TreeNode | undefined, dataTransfer: vscode.DataTransfer): Promise<void> {
 		let targetId = target === undefined ? undefined : isFileNode(target) ? target.worksetId : target.id;
 		let payload = await payloadFrom(dataTransfer);
-		if (payload && targetId !== undefined && payload.sources.every((id) => id === targetId)) {
+		if (payload && targetId !== undefined && payload.sources.length > 0 && payload.sources.every((id) => id === targetId)) {
 			this.actions.reportAlreadyIn(this.store.get(targetId));
 			return;
 		}

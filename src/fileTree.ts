@@ -103,6 +103,7 @@ function compactLabel(label: string, uri: vscode.Uri): string {
 export class FileTreeService {
 	private readonly store: WorksetStore;
 	private readonly roots: WorkspaceRoots;
+	private readonly tries = new WeakMap<Workset, Map<number, TrieNode>>();
 
 	constructor(store: WorksetStore, roots: WorkspaceRoots) {
 		this.store = store;
@@ -135,6 +136,24 @@ export class FileTreeService {
 		return this.childrenOf(view, workset, folder, parent.root, parent.path, dynamic && !parent.missing);
 	}
 
+	/**
+	 * The path tree of a workset's entries in one workspace folder. Cached per workset object; the
+	 * store replaces a workset's object whenever it changes, so the cache never goes stale.
+	 */
+	private trieFor(workset: Workset, folder: vscode.WorkspaceFolder): TrieNode {
+		let perFolder = this.tries.get(workset);
+		if (!perFolder) {
+			perFolder = new Map();
+			this.tries.set(workset, perFolder);
+		}
+		let trie = perFolder.get(folder.index);
+		if (!trie) {
+			trie = buildTrie(workset.entries.filter((e) => this.roots.resolve(e.root)?.index === folder.index));
+			perFolder.set(folder.index, trie);
+		}
+		return trie;
+	}
+
 	private async childrenOf(
 		view: ViewKind,
 		workset: Workset,
@@ -143,7 +162,7 @@ export class FileTreeService {
 		path: string,
 		dynamic: boolean,
 	): Promise<FileNode[]> {
-		let trie = buildTrie(workset.entries.filter((e) => this.roots.resolve(e.root)?.index === folder.index));
+		let trie = this.trieFor(workset, folder);
 		let trieNode = findNode(trie, path);
 		let explorer = explorerSettings();
 		let fromTrie = async (node: TrieNode, label: string, missing?: boolean): Promise<FileNode> => {
@@ -166,8 +185,8 @@ export class FileTreeService {
 		let isExcluded = (childPath: string): boolean => excludes.some((pattern) => pattern.test(childPath));
 		let listing = await readDirectory(dirUri);
 		let explicit = trieNode?.children ?? new Map<string, TrieNode>();
-		let nodes: FileNode[] = [];
 		let seen = new Set<string>();
+		let pending: Promise<FileNode>[] = [];
 		for (let [name, type] of listing) {
 			let childPath = path ? `${path}/${name}` : name;
 			let trieChild = explicit.get(name);
@@ -185,17 +204,21 @@ export class FileTreeService {
 						: 'dynamicFile';
 			if (origin === 'dynamicFolder' && explorer.compact && !trieChild) {
 				// Like the Explorer: a folder whose only child is a folder is shown as one `a/b` item.
-				let chain = await this.compactOnDisk(dirUri, childPath, name, isExcluded);
-				nodes.push(this.node(view, workset.id, root, chain.path, chain.label, origin, true, joinPath(folder.uri, chain.path), false));
+				pending.push(
+					this.compactOnDisk(dirUri, childPath, name, isExcluded).then((chain) =>
+						this.node(view, workset.id, root, chain.path, chain.label, origin, true, joinPath(folder.uri, chain.path), false),
+					),
+				);
 				continue;
 			}
-			nodes.push(this.node(view, workset.id, root, childPath, name, origin, isDir, joinPath(dirUri, name), false));
+			pending.push(Promise.resolve(this.node(view, workset.id, root, childPath, name, origin, isDir, joinPath(dirUri, name), false)));
 		}
 		for (let [name, trieChild] of explicit) {
 			if (!seen.has(name)) {
-				nodes.push(await fromTrie(trieChild, name, true));
+				pending.push(fromTrie(trieChild, name, true));
 			}
 		}
+		let nodes = await Promise.all(pending);
 		let sortItem = (n: FileNode): SortItem => ({ isDirectory: n.isDirectory, name: n.label.split('/')[0] ?? n.label });
 		return nodes.sort((a, b) => compareTreeItems(sortItem(a), sortItem(b), explorer.sort));
 	}

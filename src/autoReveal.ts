@@ -1,10 +1,11 @@
 import * as vscode from 'vscode';
 import { tabUri } from './actions.ts';
 import { compileExcludes } from './core/glob.ts';
+import { isFileNode } from './fileTree.ts';
 import type { FileNode } from './fileTree.ts';
 import type { WorkspaceRoots } from './roots.ts';
 import type { WorksetStore } from './store.ts';
-import type { ActiveFilesProvider } from './views.ts';
+import type { ActiveFilesProvider, ActiveNode } from './views.ts';
 
 /**
  * Selects the active editor's file in Workset Files, like the Explorer does.
@@ -13,11 +14,12 @@ import type { ActiveFilesProvider } from './views.ts';
 export class ActiveEditorRevealer implements vscode.Disposable {
 	private readonly disposables: vscode.Disposable[];
 	private timer: ReturnType<typeof setTimeout> | undefined;
-	private readonly view: vscode.TreeView<FileNode>;
+	private requests = 0;
+	private readonly view: vscode.TreeView<ActiveNode>;
 	private readonly provider: ActiveFilesProvider;
 	private readonly roots: WorkspaceRoots;
 
-	constructor(view: vscode.TreeView<FileNode>, provider: ActiveFilesProvider, store: WorksetStore, roots: WorkspaceRoots) {
+	constructor(view: vscode.TreeView<ActiveNode>, provider: ActiveFilesProvider, store: WorksetStore, roots: WorkspaceRoots) {
 		this.view = view;
 		this.provider = provider;
 		this.roots = roots;
@@ -29,7 +31,10 @@ export class ActiveEditorRevealer implements vscode.Disposable {
 			// Re-reveal after switching worksets or when the active file was just added.
 			store.onDidChange(schedule),
 			vscode.workspace.onDidChangeConfiguration((event) => {
-				if (event.affectsConfiguration('explorer.autoReveal')) {
+				if (
+					event.affectsConfiguration('explorer.autoReveal') ||
+					event.affectsConfiguration('explorer.autoRevealExclude')
+				) {
 					schedule();
 				}
 			}),
@@ -38,6 +43,8 @@ export class ActiveEditorRevealer implements vscode.Disposable {
 
 	/** Reveals the active editor's file now. Resolves to the revealed item, if any. */
 	async revealActiveEditor(): Promise<FileNode | undefined> {
+		// A newer request (editor switch, workset change, ...) supersedes this one, even mid-lookup.
+		let request = ++this.requests;
 		let uri = tabUri(vscode.window.tabGroups.activeTabGroup.activeTab);
 		if (!uri || !this.view.visible) {
 			return undefined;
@@ -53,11 +60,11 @@ export class ActiveEditorRevealer implements vscode.Disposable {
 			return undefined;
 		}
 		let node = await this.provider.findNode(location);
-		if (!node) {
+		if (!node || request !== this.requests) {
 			return undefined;
 		}
 		let [selected, ...rest] = this.view.selection;
-		if (rest.length === 0 && selected?.path === node.path && selected.root === node.root) {
+		if (rest.length === 0 && isFileNode(selected) && selected.path === node.path && selected.root === node.root) {
 			return node;
 		}
 		try {
