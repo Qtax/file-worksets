@@ -94,7 +94,7 @@ Add Files from Branch (button, menu, palette)
 
 **Where it's shown:**
 
-- **Workset tooltip** in the File Worksets list: *"Created on feature/login @ 1a2b3c4"*.
+- **Workset tooltip** in the Worksets list: *"Created on feature/login @ 1a2b3c4"*.
 - **Switch/New Workset picker:** in the detail line.
 - Worksets created before this feature show nothing.
 
@@ -104,8 +104,8 @@ Add Files from Branch (button, menu, palette)
 
 | Where | Items |
 | --- | --- |
-| Workset Files empty and no-active rows | **Add Files from Branch ‹name›** (`git-branch` icon) as a third button, only when a repository exists. Tooltip: "Files committed on ‹name› since ‹base›". The diff isn't computed up front; an empty result just shows the message. |
-| Workset Files "…" (More Actions) menu, add group | Add Files from Branch, Add Files from Commit… |
+| Workset view empty and no-active rows | **Add Files from Branch ‹name›** (`git-branch` icon) as a third button, only when a repository exists. Tooltip: "Files committed on ‹name› since ‹base›". The diff isn't computed up front; an empty result just shows the message. |
+| Workset view "…" (More Actions) menu, add group | Add Files from Branch, Add Files from Commit… |
 | Command Palette | Both commands, when a repository exists |
 | Source Control view, file context menu (`scm/resourceState/context`) | **Add to Active Workset**, for the selected files in Changes and Staged Changes |
 | Source Control view, group context menu (`scm/resourceGroup/context`) | **Add to Active Workset**, for all files in that group |

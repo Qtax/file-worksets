@@ -8,7 +8,7 @@ import type { WorksetStore } from './store.ts';
 import type { ActiveFilesProvider, ActiveNode } from './views.ts';
 
 /**
- * Selects the active editor's file in Workset Files, like the Explorer does.
+ * Selects the active editor's file in Workset view, like the Explorer does.
  * Follows the Explorer's own settings: `explorer.autoReveal` and `explorer.autoRevealExclude`.
  */
 export class ActiveEditorRevealer implements vscode.Disposable {

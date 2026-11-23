@@ -4,8 +4,8 @@
 
 ### Views
 
-- **Own activity bar container, "File Worksets"**, with two views. Both can be dragged into the Explorer container or anywhere else, like any built-in view.
-- **Workset Files**
+- **In the Explorer by default:** two sections below the folder tree, **Workset** (expanded) and **Worksets** (collapsed at first). There's no Activity Bar icon. Like any view, both can be dragged to another place (another container, the Activity Bar, the panel), and VS Code remembers it.
+- **Workset**
   - Shows only the active workset's files, grouped by workspace-relative folder path.
   - Looks like the Explorer:
     - File icon theme.
@@ -22,41 +22,41 @@
     - `explorer.autoReveal` turns it on or off. `focusNoScroll` behaves like on, because the tree view API can't select without scrolling.
     - `explorer.autoRevealExclude` skips files under excluded folders, `node_modules` by default.
     - Files included through a folder entry are revealed too. Files that aren't in the workset leave the selection unchanged.
-  - The view title is the active workset's name. When it's the only visible view in the sidebar, the header reads "File Worksets: NAME - Multi-select is supported.
+  - The header reads "WORKSET" followed by the active workset's name as a dimmed description (just "WORKSET" when none is active). Both views' `contextualTitle` equals their name, so when one is moved into a container of its own the header is just "WORKSET" or "WORKSETS", without a "File Worksets: " prefix. Whether VS Code also shows the description in that case is up to VS Code. Multi-select is supported.
   - Multi-root workspaces show one top-level node per workspace folder that has entries.
-- **File Worksets** (the list of worksets; when it's the only visible view, the header is just "File Worksets")
+- **Worksets** (the list of worksets)
   - Lists all saved worksets. The active one has a filled check icon, a highlighted name, and an "active" description.
   - Each item shows its file and folder counts. The tooltip shows when it was created and last used.
   - Clicking an inactive workset activates it. Expanding any workset browses its files without activating it.
   - Sort by creation date (default, newest first), last used, or name using the title-bar **Sort** button (`fileWorksets.sortOrder`).
-- **Status bar item** showing the active workset. Clicking it opens Switch/New Workset. Turn it off with `fileWorksets.showStatusBarItem`.
+- **Status bar item** showing the active workset, with the extension's own icon. The icon (documents with a star; source `design/worksets.svg`) is bundled as a one-glyph icon font (`resources/file-worksets.woff`) and contributed as `$(file-worksets)`, which both views and the status bar use, so it follows the theme like built-in icons. Clicking it opens Switch/New Workset. Turn it off with `fileWorksets.showStatusBarItem`. It can't be a drop target: VS Code's status bar API has no drag and drop.
 - **Explorer marks for the active workset.** Names of files and folders in the active workset are tinted with a themeable color, `fileWorksets.worksetFileForeground`. It defaults to the keyword purple of the default themes mixed 30% toward the default text color (`#C79BC4` in Dark+, `#981DB6` in Light+), so it reads as a light tint of normal text. High contrast themes use their `charts.purple`. Extension colors can't be computed from the theme at runtime, so these are fixed values per theme type. Override it with `workbench.colorCustomizations`. Their parent folders get VS Code's small "contains" dot, like Git's.
   - For folders added as a whole, only the folder itself is marked.
   - The tooltip names the workset.
   - `fileWorksets.explorerDecoration` switches between `color` (default; least crowded next to Git's letters), `badge`, `both`, and `off`.
   - The badge text is set with `fileWorksets.explorerDecorationBadge`: ★ by default, at most 2 characters. VS Code only allows text badges, not icons.
   - On files that Git also colors (modified, untracked, …), Git's color may take precedence.
-  - VS Code applies file decorations everywhere a file is shown, so the badge also appears in editor tabs, Open Editors, and on the items in Workset Files. An extension can't limit it to the Explorer without also losing Git's decorations in its own views.
+  - VS Code applies file decorations everywhere a file is shown, so the badge also appears in editor tabs, Open Editors, and on the items in the Workset view. An extension can't limit it to the Explorer without also losing Git's decorations in its own views.
 - **Welcome content** for when no folder is open. It's only shown once the worksets have loaded. While VS Code starts up, the views show VS Code's thin progress bar instead of briefly flashing an empty state.
-- **No active workset** and **empty workset** are shown as rows in Workset Files instead of welcome content, because welcome content hides the tree and the view's message area isn't a drop target either. A hint ("No active workset" / "This workset is empty", with a dimmed "Drop files here to create one" / "…to add them" on the next line; full text in the tooltip) is followed by **Add Active Editor** and **Add All Open Editors** rows that act as buttons. Dropping anywhere in the view, including on these rows, creates a new workset or adds to the empty one.
+- **No active workset** and **empty workset** are shown as rows in the Workset view instead of welcome content, because welcome content hides the tree and the view's message area isn't a drop target either. A hint ("No active workset" / "This workset is empty", with a dimmed "Drop files here to create one" / "…to add them" on the next line; full text in the tooltip) is followed by **Add Active Editor** and **Add All Open Editors** rows that act as buttons. Dropping anywhere in the view, including on these rows, creates a new workset or adds to the empty one.
 
 ### Managing worksets
 
-- Create, rename, duplicate, and delete worksets. The active workset can also be deleted from the Workset Files "…" (More Actions) menu. Deleting happens right away, without a confirmation dialog. A notification ("Deleted workset "…".") offers **Undo**, which brings the worksets back with the same ID, name, creation time, files, and last-used time. A deleted active workset becomes active again, unless you've activated another one in the meantime. If its name was taken in the meantime, the restored workset becomes unnamed.
+- Create, rename, duplicate, and delete worksets. The active workset can also be deleted from the Workset view "…" (More Actions) menu. Deleting happens right away, without a confirmation dialog. A notification ("Deleted workset "…".") offers **Undo**, which brings the worksets back with the same ID, name, creation time, files, and last-used time. A deleted active workset becomes active again, unless you've activated another one in the meantime. If its name was taken in the meantime, the restored workset becomes unnamed.
 - **New worksets have no name.** They're shown by their creation time ("2026-11-20 23:51") until you rename them. Renaming is easy from several places:
   - The pencil button on the row.
-  - <kbd>F2</kbd> in the File Worksets list.
+  - <kbd>F2</kbd> in the Worksets list.
   - The right-click menu.
-  - The Workset Files "…" menu.
+  - The Workset view "…" menu.
   - The rename button in Switch/New Workset.
   Clearing the name makes the workset unnamed again. Names must be unique, ignoring case.
-- <kbd>Delete</kbd> (<kbd>Cmd+Backspace</kbd> on macOS) on selected worksets in the File Worksets list deletes them, with Undo in the notification. With several worksets selected, all of them are deleted at once, from the key or the context menu. **Delete Workset** in the Command Palette opens a multi-select picker.
-- **Switch/New Workset…** (palette, status bar, Workset Files toolbar) opens a Quick Pick in the same order as the File Worksets list (`fileWorksets.sortOrder`). The active workset is highlighted when it opens (or **No Active Workset** if none is active), so you see where you are. The Quick Pick also has inline rename and delete buttons and a **New Workset** entry. The other workset pickers (Add to Workset…, Copy/Move to Workset…, Delete Workset from the palette) use the same order.
+- <kbd>Delete</kbd> (<kbd>Cmd+Backspace</kbd> on macOS) on selected worksets in the Worksets list deletes them, with Undo in the notification. With several worksets selected, all of them are deleted at once, from the key or the context menu. **Delete Workset** in the Command Palette opens a multi-select picker.
+- **Switch/New Workset…** (palette, status bar, Workset view toolbar) opens a Quick Pick in the same order as the Worksets list (`fileWorksets.sortOrder`). The active workset is highlighted when it opens (or **No Active Workset** if none is active), so you see where you are. The Quick Pick also has inline rename and delete buttons and a **New Workset** entry. The other workset pickers (Add to Workset…, Copy/Move to Workset…, Delete Workset from the palette) use the same order.
 - Switching only updates the sidebar. It never opens or closes tabs, changes Git state, or modifies files. Workset definitions aren't rewritten either; only the active workset and last-used time are recorded in VS Code's workspace state.
-- **No active workset** is a valid state for working without a workset in mind. Nothing is auto-added and Workset Files is empty; deleting files in VS Code still removes them from any workset that contains them. You can get there in four ways:
+- **No active workset** is a valid state for working without a workset in mind. Nothing is auto-added and the Workset view is empty; deleting files in VS Code still removes them from any workset that contains them. You can get there in four ways:
   - **Deactivate Workset** in the Command Palette.
-  - The ⊘ button on the active row in the File Worksets list, or its context menu.
-  - The Workset Files "…" menu.
+  - The ⊘ button on the active row in the Worksets list, or its context menu.
+  - The Workset view "…" menu.
   - **No Active Workset** in Switch/New Workset.
 - Explicitly adding files (menu, toolbar, drag and drop) while no workset is active creates a new unnamed workset and activates it.
 
@@ -64,7 +64,7 @@
 
 - **Explorer context menu:** **Add to Active Workset** works on single or multi-selections of files and folders. It's the only File Worksets entry there; if no workset is active, a new one is created. **Add to Workset…** (pick the workset) is still in the Command Palette.
 - **Editor tab context menu:** the same single entry.
-- **Workset Files toolbar:** **Add Active Editor** (works for text, custom, notebook, and diff editors), **Add All Open Editors**, and **Remove Active Editor**.
+- **Workset view toolbar:** **Add Active Editor** (works for text, custom, notebook, and diff editors), **Add All Open Editors**, and **Remove Active Editor**.
 - If no workset is active, a new unnamed workset is created and activated, without asking.
 - Adding something that's already included is a no-op, including a file inside an already-added folder. A short status bar message reports what was added.
 - A file can belong to any number of worksets.
@@ -81,11 +81,11 @@ Uses VS Code's built-in Git extension, read-only. Without Git or a repository, t
   - If no workset is active, the new one is named after the branch, if that name is free. The same goes for an active workset that's unnamed and empty.
 - **Add Files from Commit…:** a picker of recent commits (HEAD marked *current*). Typing or pasting a hash (short or full) shows the matching commit even though the list only displays short hashes; any other hash, tag or ref (no spaces) offers *Use "…"*. Files are compared with the first parent; a root commit with the empty tree. Files that no longer exist are skipped and counted.
 - Adding more than 200 files asks for confirmation first.
-- **Where:** the Workset Files "…" menu, the Command Palette, and an **Add Files from Branch** row (showing the branch) in the empty and no-active states.
+- **Where:** the Workset view "…" menu, the Command Palette, and an **Add Files from Branch** row (showing the branch) in the empty and no-active states.
 - **Source Control view:** **Add to Active Workset** on files and on the Staged/Changes/Untracked/Merge groups. Deleted files are skipped.
 - **Timeline view:** **Add Files from This Commit to Workset** on Git commits of a file.
 - **Source Control graph:**
-  - **Drag** one or more commits onto Workset Files (adds to the active workset, or creates one), onto a workset in File Worksets, or onto empty space there (creates a new workset).
+  - **Drag** one or more commits onto the Workset view (adds to the active workset, or creates one), onto a workset in the Worksets list, or onto empty space there (creates a new workset).
   - **Right-click** a commit → **Add Files to Workset**. This menu is a *proposed* VS Code API (`contribSourceControlHistoryItemMenu`, declared in `enabledApiProposals`): it works when running from source (F5). For an installed build, add `"enable-proposed-api": ["local.file-worksets"]` to `argv.json` (Command Palette → *Preferences: Configure Runtime Arguments*) and restart. Without it, VS Code logs a warning and simply doesn't show the entry. Extensions using proposed APIs can't be published to the Marketplace.
   - **Files inside an expanded commit** can't be added from the graph: VS Code doesn't let extensions contribute to their context menu (not even as a proposed API), and they don't carry drag data.
 - **Created at:** new worksets record the branch and commit they were created at (`"git": { "branch", "commit" }` in storage, plus `root` in multi-root). Shown in the workset tooltip ("Created 2 hours ago on feature/login @ 1a2b3c4") and the Switch/New Workset picker. Older worksets have no record.
@@ -96,18 +96,18 @@ Uses VS Code's built-in Git extension, read-only. Without Git or a repository, t
   - **Off.**
   - **Opened Files:** files opened in a regular tab. Single-click previews (italic tabs) aren't added until they become regular tabs, for example by double-clicking or editing.
   - **Edited Files** (default): files whose content changes in the active editor. Edits to other files don't count, so Replace All across files and rename refactorings don't add all the files they touch. VS Code doesn't report where an edit came from, so a refactoring that changes the active file does add it.
-- A button in the **Workset Files** title bar shows the current mode as an icon (⊘ off, eye for opened, pencil for edited). Clicking it opens a picker. **Set Auto-Add Mode…** in the Command Palette does the same.
+- A button in the **Workset view** title bar shows the current mode as an icon (⊘ off, eye for opened, pencil for edited). Clicking it opens a picker. **Set Auto-Add Mode…** in the Command Palette does the same.
 - The button writes to user settings, unless the setting is already defined at workspace level, so it doesn't modify the repo's `.vscode/settings.json`.
 - Nothing is added while no workset is active, and you're never prompted. The storage file `.vscode/file-worksets.json` itself is never added.
 - A removed file comes back if you open or edit it again while auto-add is on.
 
 ### Drag and drop
 
-- From the Explorer or editor tabs onto **Workset Files**: adds the items to the active workset. With no active workset, dropping there creates a new one from the dropped items.
-- From the Explorer onto a workset in **File Worksets**: adds the items to that workset.
-- From **Workset Files** or another workset onto a workset: copies the items. Dropping an implicit folder copies all entries under it.
-- Dragging a whole workset onto another workset, or onto Workset Files, merges its entries.
-- Dropping onto empty space in **File Worksets** creates a new workset from the dropped items.
+- From the Explorer or editor tabs onto **Workset view**: adds the items to the active workset. With no active workset, dropping there creates a new one from the dropped items.
+- From the Explorer onto a workset in **Worksets**: adds the items to that workset.
+- From **Workset view** or another workset onto a workset: copies the items. Dropping an implicit folder copies all entries under it.
+- Dragging a whole workset onto another workset, or onto the Workset view, merges its entries.
+- Dropping onto empty space in **Worksets** creates a new workset from the dropped items.
 - Dragging files out of either view into the editor area opens them.
 - **Copy to Workset…** and **Move to Workset…** context menu commands handle explicit copy and move.
 - Dropping items onto the workset they came from, or adding only items that are already in the workset, shows "Already in "WORKSET". Nothing changed." in the status bar. VS Code doesn't let extensions show a "not allowed" cursor or suppress the drop highlight for a specific target.
@@ -124,10 +124,10 @@ VS Code doesn't let extensions reuse the Explorer's own context menu in their vi
 - Workset items at the end: Remove from Workset, Copy to Workset…, Move to Workset….
 - **Keyboard shortcuts** in both views, the same as the Explorer's: <kbd>F2</kbd> Rename, <kbd>Ctrl+Enter</kbd> Open to the Side, Copy Path, Copy Relative Path, and Reveal in OS.
   - Rename is <kbd>F2</kbd> on Windows/Linux and <kbd>Enter</kbd> on macOS, the Explorer's defaults. On macOS, <kbd>Cmd+Down</kbd> opens the item, as in the Explorer.
-  - On a workset row in the File Worksets list, the rename key renames the workset.
+  - On a workset row in the Worksets list, the rename key renames the workset.
   - VS Code doesn't let extensions read your keybindings, so if you've rebound the Explorer's rename, rebind **File Worksets: Rename…** too.
   - Renaming uses an input box at the top of the window. VS Code has no API for inline editing in extension tree views.
-  - <kbd>Delete</kbd> (<kbd>Cmd+Backspace</kbd> on macOS) is **Remove from Workset** for files and folders, not delete from disk. On a workset row in the File Worksets list, it deletes the workset.
+  - <kbd>Delete</kbd> (<kbd>Cmd+Backspace</kbd> on macOS) is **Remove from Workset** for files and folders, not delete from disk. On a workset row in the Worksets list, it deletes the workset.
 - Not included:
   - Cut/Copy/Paste use the Explorer's internal clipboard.
   - Items contributed by other extensions (Git, Timeline, etc.) only appear in the real Explorer.
@@ -184,7 +184,7 @@ VS Code doesn't let extensions reuse the Explorer's own context menu in their vi
   - Cut/Copy/Paste of files.
   - New File/New Folder in the view title bar.
   - Inline rename in the tree. VS Code has no API for it, not even a proposed one; renaming uses an input box.
-- [ ] **Filter/find in Workset Files.** The built-in tree find widget works. A filter for workset names in the File Worksets view would help when there are many worksets.
+- [ ] **Filter/find in the Workset view.** The built-in tree find widget works. A filter for workset names in the Worksets view would help when there are many worksets.
 
 ### Automation ideas
 

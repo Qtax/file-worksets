@@ -14,7 +14,7 @@ import { WorksetStore } from './store.ts';
 import { ACTIVE_VIEW_ID, ActiveFilesProvider, LIST_VIEW_ID, WorksetsProvider, type ActiveNode } from './views.ts';
 
 /** Must match the view's `name` in package.json. */
-const ACTIVE_VIEW_NAME = 'Workset Files';
+const ACTIVE_VIEW_NAME = 'Workset';
 
 export interface FileWorksetsApi {
 	readonly store: WorksetStore;
@@ -145,8 +145,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<FileWo
 
 	let updateChrome = (): void => {
 		let active = store.active;
-		// Shown as "File Worksets: <name>" when this is the only visible view in the container.
-		activeView.title = active ? worksetLabel(active) : ACTIVE_VIEW_NAME;
+		// A fixed title equal to the view's contextualTitle, so a view moved into its own container isn't
+		// shown as "<container>: <title>". The workset's name goes in the (dimmed) description instead.
+		activeView.title = ACTIVE_VIEW_NAME;
+		activeView.description = active ? worksetLabel(active) : undefined;
 		void vscode.commands.executeCommand('setContext', 'fileWorksets.hasActiveWorkset', active !== undefined);
 		void vscode.commands.executeCommand('setContext', 'fileWorksets.hasWorksets', store.all.length > 0);
 		// Selects which icon variant of the auto-add button is shown.
@@ -156,7 +158,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<FileWo
 			statusBar.hide();
 			return;
 		}
-		statusBar.text = `$(files) ${active ? worksetLabel(active) : 'No Workset'}`;
+		// Our own icon, contributed as an icon font in package.json (`contributes.icons`).
+		statusBar.text = `$(file-worksets) ${active ? worksetLabel(active) : 'No Workset'}`;
 		statusBar.tooltip = active
 			? `Active workset: ${worksetLabel(active)}. Click to switch or create a workset.`
 			: 'No active workset. Click to switch or create a workset.';
@@ -369,7 +372,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<FileWo
 		}
 	});
 	register('fileWorksets.removeFromWorkset', async (primary?: unknown, selection?: unknown) => {
-		// The Delete key in the File Worksets list deletes selected worksets; file items are removed from their workset.
+		// The Delete key in the Worksets list deletes selected worksets; file items are removed from their workset.
 		if (primary === LIST_VIEW_ID) {
 			let worksetIds = listView.selection.filter(isWorksetNode).map((n) => n.id);
 			let hasFiles = listView.selection.some(isFileNode);
@@ -489,7 +492,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<FileWo
 			}
 			return undefined;
 		}
-		// The rename key on a workset row in the File Worksets list renames the workset.
+		// The rename key on a workset row in the Worksets list renames the workset.
 		let [focused] = primary === LIST_VIEW_ID ? selection : [];
 		if (isWorksetNode(focused)) {
 			return actions.renameWorkset(focused.id);

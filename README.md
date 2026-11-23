@@ -1,13 +1,13 @@
 # File Worksets
 
-A focused, Explorer-like sidebar for the files that matter to the task at hand. Hand-pick files and folders from anywhere in the repo, save them as a named **workset**, and switch between worksets without touching your editors, branches, or files.
+A focused, Explorer-like sidebar for the files that matter to the task at hand. Hand-pick files and folders from anywhere in the repo, save them as a named **workset**.
 
-- **Workset Files** view: only the active workset's files, grouped by folder like the Explorer. Only folders that lead to a selected file are shown.
-- **File Worksets** view: all saved worksets. Click one to activate it, or expand it to browse its files.
+- **Workset** view: only the active workset's files, grouped by folder like the Explorer.
+- **Worksets** view: all saved worksets. Click one to activate it, or expand it to browse its files.
 - **Switch/New Workset…** quick pick (also from the status bar) for keyboard navigation.
-- Add files or whole folders from the Explorer context menu, the editor tab menu, drag and drop, or the Workset Files toolbar.
+- Add files or whole folders from the Explorer context menu, the editor tab menu, drag and drop, or the Workset view toolbar.
 - Add the files committed on the current Git branch, or changed in a commit, and from the Source Control view. Each workset records the branch and commit it was created at.
-- Files you edit are added to the active workset automatically. You can switch this to opened files or turn it off with `fileWorksets.autoAdd` or the toggle in the Workset Files title bar.
+- Files you edit are added to the active workset automatically. You can switch this to opened files or turn it off with `fileWorksets.autoAdd` or the toggle in the Workset view title bar.
 
 See [FEATURES.md](FEATURES.md) for the full feature list and what's planned next.
 
@@ -36,6 +36,14 @@ npm run package        # build a .vsix
 
 Press <kbd>F5</kbd> in VS Code to launch an Extension Development Host.
 
+**Folders:** `resources/` holds the files shipped in the extension package (the listing icon and the icon font). `design/` holds their sources, which aren't packaged: the icon as SVG, from which the icon font is built, and the original 1024×1024 listing icon, from which the 256×256 `resources/icon.png` is cropped and masked.
+
+## License
+
+[MIT](LICENSE).
+
 ## Credits
 
-The extension icon ([resources/worksets.svg](resources/worksets.svg)) is based on the `files` icon from [Codicons](https://github.com/microsoft/vscode-codicons) by Microsoft, licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). A star was added.
+The icon used for the views and the status bar is based on the `files` icon from [Codicons](https://github.com/microsoft/vscode-codicons) by Microsoft, licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). A star was added.
+
+The extension listing icon was generated with an AI image model.

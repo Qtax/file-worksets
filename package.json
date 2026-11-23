@@ -5,7 +5,8 @@
 	"version": "0.1.0",
 	"publisher": "local",
 	"private": true,
-	"license": "UNLICENSED",
+	"license": "MIT",
+	"icon": "resources/icon.png",
 	"type": "module",
 	"engines": {
 		"vscode": "^1.100.0"
@@ -28,30 +29,31 @@
 		"contribSourceControlHistoryItemMenu"
 	],
 	"contributes": {
-		"viewsContainers": {
-			"activitybar": [
-				{
-					"id": "fileWorksets",
-					"title": "File Worksets",
-					"icon": "resources/worksets.svg"
-				}
-			]
-		},
 		"views": {
-			"fileWorksets": [
+			"explorer": [
 				{
 					"id": "fileWorksets.files",
-					"name": "Workset Files",
-					"icon": "resources/worksets.svg",
-					"contextualTitle": "File Worksets"
+					"name": "Workset",
+					"icon": "$(file-worksets)",
+					"contextualTitle": "Workset"
 				},
 				{
 					"id": "fileWorksets.list",
-					"name": "File Worksets",
-					"icon": "resources/worksets.svg",
-					"contextualTitle": "File Worksets"
+					"name": "Worksets",
+					"icon": "$(file-worksets)",
+					"contextualTitle": "Worksets",
+					"visibility": "collapsed"
 				}
 			]
+		},
+		"icons": {
+			"file-worksets": {
+				"description": "File Worksets icon (views and status bar)",
+				"default": {
+					"fontPath": "./resources/file-worksets.woff",
+					"fontCharacter": "\\E001"
+				}
+			}
 		},
 		"viewsWelcome": [
 			{
@@ -885,7 +887,7 @@
 						"Alphabetical by name."
 					],
 					"default": "created",
-					"description": "Sort order of the File Worksets view."
+					"description": "Sort order of the Worksets view."
 				},
 				"fileWorksets.showStatusBarItem": {
 					"type": "boolean",
@@ -929,7 +931,7 @@
 					],
 					"default": "edited",
 					"scope": "window",
-					"markdownDescription": "Automatically add files to the active workset. Nothing is added while no workset is active. Can also be changed with the button in the **Workset Files** title bar."
+					"markdownDescription": "Automatically add files to the active workset. Nothing is added while no workset is active. Can also be changed with the button in the **Workset** view title bar."
 				},
 				"fileWorksets.git.baseBranch": {
 					"type": "string",

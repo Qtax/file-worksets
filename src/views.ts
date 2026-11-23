@@ -157,7 +157,7 @@ const EMPTY_ACTIONS: readonly ActionNode[] = [
 	...ADD_ACTIONS,
 ];
 
-/** "Workset Files": the files of the active workset, grouped by folder like the Explorer. */
+/** "Workset": the files of the active workset, grouped by folder like the Explorer. */
 export class ActiveFilesProvider implements vscode.TreeDataProvider<ActiveNode>, vscode.TreeDragAndDropController<ActiveNode> {
 	readonly dropMimeTypes = [ENTRIES_MIME, URI_LIST, HISTORY_ITEM_MIME];
 	readonly dragMimeTypes = [ENTRIES_MIME, URI_LIST];
@@ -311,7 +311,7 @@ export class ActiveFilesProvider implements vscode.TreeDataProvider<ActiveNode>,
 	}
 }
 
-/** "File Worksets": every saved workset; expand one to browse its files. */
+/** "Worksets": every saved workset; expand one to browse its files. */
 export class WorksetsProvider implements vscode.TreeDataProvider<TreeNode>, vscode.TreeDragAndDropController<TreeNode> {
 	readonly dropMimeTypes = [ENTRIES_MIME, URI_LIST, HISTORY_ITEM_MIME];
 	readonly dragMimeTypes = [ENTRIES_MIME, URI_LIST];

@@ -57,8 +57,8 @@ suite('File Worksets', () => {
 		assert.equal(api.store.active?.entries.length, 2);
 	});
 
-	test('view title shows the active workset name', () => {
-		assert.equal(api.activeView.title, 'Task A');
+	test('view header shows the active workset name as its description', () => {
+		assert.equal(api.activeView.description, 'Task A');
 	});
 
 	test('tree shows only folders that lead to selected files', async () => {
@@ -122,7 +122,7 @@ suite('File Worksets', () => {
 
 		await vscode.commands.executeCommand('fileWorksets.activateWorkset', 'ext1');
 		assert.equal(api.store.active?.name, 'External');
-		assert.equal(api.activeView.title, 'External');
+		assert.equal(api.activeView.description, 'External');
 		assert.deepEqual(await labels(), ['src']);
 
 		await vscode.commands.executeCommand('fileWorksets.activateWorkset', taskA);
@@ -186,7 +186,7 @@ suite('File Worksets', () => {
 		fromExplorer.set('text/uri-list', new vscode.DataTransferItem(uri('src/lib/b.ts').toString()));
 		await api.worksets.handleDrop(target, fromExplorer);
 
-		// Drag an implicit folder from Workset Files: copies only the entries under it, not its disk siblings.
+		// Drag an implicit folder from Workset view: copies only the entries under it, not its disk siblings.
 		let docs = await child(undefined, 'docs');
 		let lib = await child(undefined, 'src/lib');
 		let fromView = new vscode.DataTransfer();
@@ -242,7 +242,7 @@ suite('File Worksets', () => {
 		}
 	});
 
-	test('selects the active editor in Workset Files, following explorer.autoReveal settings', async () => {
+	test('selects the active editor in Workset view, following explorer.autoReveal settings', async () => {
 		let selected = (): string | undefined => {
 			let [node] = api.activeView.selection;
 			return node?.kind === 'file-node' ? node.path : undefined;
@@ -380,7 +380,7 @@ suite('File Worksets', () => {
 		try {
 			await vscode.commands.executeCommand('fileWorksets.deactivateWorkset');
 			assert.equal(activeId(), undefined);
-			assert.equal(api.activeView.title, 'Workset Files');
+			assert.equal(api.activeView.description, undefined);
 			assert.deepEqual(await children(), []);
 			let rows = (await api.activeFiles.getChildren()).map((n) => api.activeFiles.getTreeItem(n).command?.command);
 			assert.deepEqual(rows, [undefined, undefined, 'fileWorksets.addActiveEditor', 'fileWorksets.addOpenEditors']);
@@ -397,7 +397,7 @@ suite('File Worksets', () => {
 			let created = api.store.active;
 			assert.ok(created && created.id !== previous);
 			assert.equal(created.name, '');
-			assert.match(api.activeView.title ?? '', /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+			assert.match(api.activeView.description ?? '', /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
 			assert.deepEqual(created.entries.map((e) => e.path), ['src/a.ts']);
 			api.actions.deleteWorksets([created.id]);
 
