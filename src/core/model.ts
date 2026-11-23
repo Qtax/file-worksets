@@ -12,11 +12,20 @@ export interface WorksetEntry {
 	readonly root?: string | undefined;
 }
 
+/** Where a workset was created: the Git branch (absent when detached) and commit. */
+export interface WorksetGit {
+	readonly branch?: string;
+	readonly commit: string;
+	/** Workspace folder of the repository; only stored in multi-root workspaces. */
+	readonly root?: string;
+}
+
 export interface Workset {
 	readonly id: string;
 	readonly name: string;
 	readonly createdAt: string;
 	readonly entries: readonly WorksetEntry[];
+	readonly git?: WorksetGit;
 }
 
 export type SortOrder = 'lastUsed' | 'created' | 'name';
@@ -247,6 +256,7 @@ export function serializeWorksets(worksets: readonly Workset[]): string {
 			id: w.id,
 			name: w.name,
 			createdAt: w.createdAt,
+			...(w.git ? { git: w.git } : {}),
 			files: toStored(w.entries, 'file'),
 			folders: toStored(w.entries, 'folder'),
 		})),
@@ -338,9 +348,25 @@ export function parseWorksets(text: string, newId: () => string, options: ParseO
 			...parseStoredPaths(raw.files, 'file', backslashIsSeparator),
 			...parseStoredPaths(raw.folders, 'folder', backslashIsSeparator),
 		]);
-		result.push({ id, name, createdAt, entries });
+		let git = parseGit(raw.git);
+		result.push(git ? { id, name, createdAt, entries, git } : { id, name, createdAt, entries });
 	}
 	return result;
+}
+
+function parseGit(value: unknown): WorksetGit | undefined {
+	if (!isRecord(value) || typeof value.commit !== 'string' || !/^[0-9a-f]{4,64}$/i.test(value.commit)) {
+		return undefined;
+	}
+	let branch = typeof value.branch === 'string' && value.branch.trim() ? value.branch.trim() : undefined;
+	let root = typeof value.root === 'string' && value.root ? value.root : undefined;
+	return { ...(branch ? { branch } : {}), commit: value.commit, ...(root ? { root } : {}) };
+}
+
+/** "feature/login @ 1a2b3c4", or just the short commit when HEAD was detached. */
+export function formatGitOrigin(git: WorksetGit): string {
+	let commit = git.commit.slice(0, 7);
+	return git.branch ? `${git.branch} @ ${commit}` : commit;
 }
 
 export function formatRelativeTime(iso: string | undefined, now: number = Date.now()): string {

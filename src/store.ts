@@ -8,6 +8,7 @@ import {
 	serializeWorksets,
 	type Workset,
 	type WorksetEntry,
+	type WorksetGit,
 } from './core/model.ts';
 import type { Location, WorkspaceRoots } from './roots.ts';
 import { StorageConflictError, type StorageBackend } from './storage.ts';
@@ -53,6 +54,8 @@ export class WorksetStore implements vscode.Disposable {
 	private readonly changeEmitter = new vscode.EventEmitter<void>();
 	readonly onDidChange = this.changeEmitter.event;
 	private loaded: Promise<void> = new Promise<void>(() => undefined);
+	/** Supplies the Git branch and commit recorded on new worksets, if Git is available. */
+	gitOrigin: (() => WorksetGit | undefined) | undefined;
 
 	/** Resolves once the current storage has been read (the first load, or after a storage switch). */
 	whenLoaded(): Promise<void> {
@@ -218,11 +221,13 @@ export class WorksetStore implements vscode.Disposable {
 		if (!this.canChange()) {
 			return undefined;
 		}
+		let git = this.gitOrigin?.();
 		let workset: Workset = {
 			id: this.newId(),
 			name: name.trim(),
 			createdAt: new Date().toISOString(),
 			entries: addEntries([], entries, this.roots.defaultRoot()).entries,
+			...(git ? { git } : {}),
 		};
 		this.worksets = [...this.worksets, workset];
 		if (activate) {

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import * as vscode from 'vscode';
 import type { FileWorksetsApi } from '../../src/extension.ts';
 import { serializeWorksets } from '../../src/core/model.ts';
@@ -574,6 +575,109 @@ suite('File Worksets', () => {
 			assert.deepEqual(fast.writes, [], 'the older switch must not migrate into the newer storage');
 		} finally {
 			await api.store.useBackend(new FileStorageBackend(folder));
+		}
+	});
+
+	// Last: turns the test workspace into a Git repository.
+	test('git: add files from the branch and from a commit; new worksets record the branch and commit', async function () {
+		let git = (...args: string[]): string =>
+			execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', '-c', 'core.autocrlf=false', ...args], {
+				cwd: root.fsPath,
+				encoding: 'utf8',
+			}).trim();
+		try {
+			git('--version');
+		} catch {
+			this.skip();
+		}
+		let write = (path: string, text: string): Thenable<void> => vscode.workspace.fs.writeFile(uri(path), new TextEncoder().encode(text));
+		git('init', '-b', 'main');
+		await write('git/keep.ts', '// keep');
+		await write('git/remove.ts', '// remove');
+		git('add', '-A');
+		git('commit', '-m', 'base');
+		git('checkout', '-b', 'feature');
+		await write('git/added.ts', '// added');
+		await write('git/keep.ts', '// keep, changed');
+		git('rm', '-q', 'git/remove.ts');
+		git('add', '-A');
+		git('commit', '-m', 'feature work');
+		await write('git/second.ts', '// second');
+		git('add', '-A');
+		git('commit', '-m', 'second');
+		let head = git('rev-parse', 'HEAD');
+		await vscode.commands.executeCommand('git.openRepository', root.fsPath);
+		await waitFor(() => api.git.currentBranch() === 'feature', 'the Git extension to open the repository');
+
+		let previous = api.store.active?.id;
+		let created: string[] = [];
+		try {
+			// With no active workset, the empty state offers the branch, and adding creates a workset named after it.
+			api.store.setActive(undefined);
+			let rows = await api.activeFiles.getChildren();
+			assert.ok(rows.some((n) => n.kind === 'action' && n.id === 'add-branch' && n.description === 'feature'));
+			await vscode.commands.executeCommand('fileWorksets.addBranchFiles');
+			let branchSet = api.store.active;
+			assert.ok(branchSet);
+			created.push(branchSet.id);
+			assert.equal(branchSet.name, 'feature');
+			assert.deepEqual(branchSet.git, { branch: 'feature', commit: head });
+			assert.deepEqual(branchSet.entries.map((e) => e.path).sort(), ['git/added.ts', 'git/keep.ts', 'git/second.ts']);
+			api.store.delete(branchSet.id);
+
+			// An unnamed, empty active workset is named after the branch too.
+			await vscode.commands.executeCommand('fileWorksets.createWorkset', '');
+			let unnamed = api.store.active;
+			assert.ok(unnamed && unnamed.name === '');
+			created.push(unnamed.id);
+			await vscode.commands.executeCommand('fileWorksets.addBranchFiles');
+			assert.equal(api.store.get(unnamed.id)?.name, 'feature');
+
+			// Source Control graph: right-click (repository + history items) and dragging a commit.
+			await vscode.commands.executeCommand('fileWorksets.createWorkset', 'Graph');
+			let graphSet = api.store.active;
+			assert.ok(graphSet);
+			created.push(graphSet.id);
+			await vscode.commands.executeCommand('fileWorksets.addHistoryItems', { rootUri: root }, { id: head, parentIds: [] });
+			assert.deepEqual(api.store.get(graphSet.id)?.entries.map((e) => e.path), ['git/second.ts']);
+			let previousCommit = git('rev-parse', 'HEAD~1');
+			let drag = new vscode.DataTransfer();
+			drag.set(
+				'scm-history-item',
+				new vscode.DataTransferItem(
+					JSON.stringify([{ resource: { path: root.fsPath }, historyItem: { id: previousCommit, parentIds: [] } }]),
+				),
+			);
+			await api.activeFiles.handleDrop(undefined, drag);
+			assert.deepEqual(api.store.get(graphSet.id)?.entries.map((e) => e.path).sort(), [
+				'git/added.ts',
+				'git/keep.ts',
+				'git/second.ts',
+			]);
+
+			// A commit: only its own files; the file it deleted is skipped.
+			await vscode.commands.executeCommand('fileWorksets.createWorkset', 'Commit');
+			let commitSet = api.store.active;
+			assert.ok(commitSet);
+			created.push(commitSet.id);
+			await vscode.commands.executeCommand('fileWorksets.addCommitFiles', 'HEAD~1');
+			assert.deepEqual(api.store.get(commitSet.id)?.entries.map((e) => e.path).sort(), ['git/added.ts', 'git/keep.ts']);
+
+			// From the Timeline (item with the commit hash, plus the file's URI) and from Source Control resources.
+			await vscode.commands.executeCommand('fileWorksets.createWorkset', 'Timeline');
+			let timelineSet = api.store.active;
+			assert.ok(timelineSet);
+			created.push(timelineSet.id);
+			await vscode.commands.executeCommand('fileWorksets.addTimelineCommit', { ref: head, id: head }, uri('git/second.ts'));
+			await vscode.commands.executeCommand('fileWorksets.addScmResources', { resourceStates: [{ resourceUri: uri('git/keep.ts') }] });
+			assert.deepEqual(api.store.get(timelineSet.id)?.entries.map((e) => e.path).sort(), ['git/keep.ts', 'git/second.ts']);
+		} finally {
+			for (let id of created) {
+				api.store.delete(id);
+			}
+			if (previous) {
+				api.store.setActive(previous);
+			}
 		}
 	});
 });

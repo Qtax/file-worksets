@@ -24,6 +24,9 @@
 	"activationEvents": [
 		"onStartupFinished"
 	],
+	"enabledApiProposals": [
+		"contribSourceControlHistoryItemMenu"
+	],
 	"contributes": {
 		"viewsContainers": {
 			"activitybar": [
@@ -172,6 +175,33 @@
 			{
 				"command": "fileWorksets.addOpenEditors",
 				"title": "Add All Open Editors to Workset",
+				"category": "File Worksets"
+			},
+			{
+				"command": "fileWorksets.addBranchFiles",
+				"title": "Add Files from Branch",
+				"category": "File Worksets",
+				"icon": "$(git-branch)"
+			},
+			{
+				"command": "fileWorksets.addCommitFiles",
+				"title": "Add Files from Commit...",
+				"category": "File Worksets",
+				"icon": "$(git-commit)"
+			},
+			{
+				"command": "fileWorksets.addTimelineCommit",
+				"title": "Add Files from This Commit to Workset",
+				"category": "File Worksets"
+			},
+			{
+				"command": "fileWorksets.addHistoryItems",
+				"title": "Add Files to Workset",
+				"category": "File Worksets"
+			},
+			{
+				"command": "fileWorksets.addScmResources",
+				"title": "Add to Active Workset",
 				"category": "File Worksets"
 			},
 			{
@@ -399,6 +429,26 @@
 				{
 					"command": "fileWorksets.addToWorkset",
 					"when": "false"
+				},
+				{
+					"command": "fileWorksets.addBranchFiles",
+					"when": "fileWorksets.hasGitRepo"
+				},
+				{
+					"command": "fileWorksets.addCommitFiles",
+					"when": "fileWorksets.hasGitRepo"
+				},
+				{
+					"command": "fileWorksets.addTimelineCommit",
+					"when": "false"
+				},
+				{
+					"command": "fileWorksets.addScmResources",
+					"when": "false"
+				},
+				{
+					"command": "fileWorksets.addHistoryItems",
+					"when": "false"
 				}
 			],
 			"explorer/context": [
@@ -406,11 +456,6 @@
 					"command": "fileWorksets.addToActiveWorkset",
 					"when": "!explorerResourceIsRoot",
 					"group": "fileWorksets@1"
-				},
-				{
-					"command": "fileWorksets.addToWorkset",
-					"when": "!explorerResourceIsRoot",
-					"group": "fileWorksets@2"
 				}
 			],
 			"editor/title/context": [
@@ -418,11 +463,6 @@
 					"command": "fileWorksets.addToActiveWorkset",
 					"when": "isFileSystemResource",
 					"group": "fileWorksets@1"
-				},
-				{
-					"command": "fileWorksets.addToWorkset",
-					"when": "isFileSystemResource",
-					"group": "fileWorksets@2"
 				}
 			],
 			"view/title": [
@@ -462,9 +502,19 @@
 					"group": "1_add@1"
 				},
 				{
+					"command": "fileWorksets.addBranchFiles",
+					"when": "view == fileWorksets.files && fileWorksets.hasGitRepo",
+					"group": "1_add@3"
+				},
+				{
+					"command": "fileWorksets.addCommitFiles",
+					"when": "view == fileWorksets.files && fileWorksets.hasGitRepo",
+					"group": "1_add@4"
+				},
+				{
 					"command": "fileWorksets.removeActiveEditor",
 					"when": "view == fileWorksets.files",
-					"group": "1_add@2"
+					"group": "1_add@5"
 				},
 				{
 					"command": "fileWorksets.removeMissing",
@@ -652,6 +702,34 @@
 					"command": "fileWorksets.removeFromWorkset",
 					"when": "view =~ /^fileWorksets\\./ && viewItem =~ /^(file|folder)(\\.missing)?$/",
 					"group": "inline"
+				}
+			],
+			"scm/resourceState/context": [
+				{
+					"command": "fileWorksets.addScmResources",
+					"when": "scmProvider == git && scmResourceGroup =~ /^(index|workingTree|untracked|merge)$/",
+					"group": "z_fileWorksets@1"
+				}
+			],
+			"scm/resourceGroup/context": [
+				{
+					"command": "fileWorksets.addScmResources",
+					"when": "scmProvider == git && scmResourceGroup =~ /^(index|workingTree|untracked|merge)$/",
+					"group": "z_fileWorksets@1"
+				}
+			],
+			"timeline/item/context": [
+				{
+					"command": "fileWorksets.addTimelineCommit",
+					"when": "timelineItem =~ /git:file:commit\\b/",
+					"group": "z_fileWorksets@1"
+				}
+			],
+			"scm/historyItem/context": [
+				{
+					"command": "fileWorksets.addHistoryItems",
+					"when": "scmProvider == git",
+					"group": "z_fileWorksets@1"
 				}
 			]
 		},
@@ -852,6 +930,12 @@
 					"default": "edited",
 					"scope": "window",
 					"markdownDescription": "Automatically add files to the active workset. Nothing is added while no workset is active. Can also be changed with the button in the **Workset Files** title bar."
+				},
+				"fileWorksets.git.baseBranch": {
+					"type": "string",
+					"default": "",
+					"scope": "window",
+					"markdownDescription": "Branch that **Add Files from Branch** compares the current branch with, for example `origin/main`. Leave empty to detect it (`origin/HEAD`, then `main`, `master` or `develop`); if none is found you're asked once per repository."
 				}
 			}
 		}

@@ -62,8 +62,8 @@
 
 ### Adding and removing
 
-- **Explorer context menu:** **Add to Active Workset** and **Add to Workset…** work on single or multi-selections of files and folders.
-- **Editor tab context menu:** the same two commands.
+- **Explorer context menu:** **Add to Active Workset** works on single or multi-selections of files and folders. It's the only File Worksets entry there; if no workset is active, a new one is created. **Add to Workset…** (pick the workset) is still in the Command Palette.
+- **Editor tab context menu:** the same single entry.
 - **Workset Files toolbar:** **Add Active Editor** (works for text, custom, notebook, and diff editors), **Add All Open Editors**, and **Remove Active Editor**.
 - If no workset is active, a new unnamed workset is created and activated, without asking.
 - Adding something that's already included is a no-op, including a file inside an already-added folder. A short status bar message reports what was added.
@@ -71,6 +71,24 @@
 - **Folder entries** include everything in the folder. The contents come from disk when you expand the folder, so new and deleted files show up automatically. Entries matching `files.exclude` are hidden. Conditional patterns (`"when": "$(basename).ts"`) aren't supported, and invalid patterns are skipped. Folder entries are labeled "entire folder".
 - **Remove from Workset** (inline ✕ button or context menu) removes only the reference. Removing an implicit folder or a workspace-root node removes all entries under it, without asking. Files that are shown only because their parent folder was added can't be removed individually; you'll be told which folder includes them.
 - **Remove Missing Files from Workset** cleans up references whose files no longer exist.
+
+### Git
+
+Uses VS Code's built-in Git extension, read-only. Without Git or a repository, these commands are hidden. Design and details: [GIT-INTEGRATION.md](GIT-INTEGRATION.md).
+
+- **Add Files from Branch:** adds the files *committed* on the current branch since it left its base branch. Deletions are skipped and renames use the new path; uncommitted and untracked changes aren't included.
+  - **Base branch:** `fileWorksets.git.baseBranch`, otherwise detected (`origin/HEAD`, then `main`, `master`, `develop`; never the current branch), otherwise picked once and remembered per repository.
+  - If no workset is active, the new one is named after the branch, if that name is free. The same goes for an active workset that's unnamed and empty.
+- **Add Files from Commit…:** a picker of recent commits (HEAD marked *current*). Typing or pasting a hash (short or full) shows the matching commit even though the list only displays short hashes; any other hash, tag or ref (no spaces) offers *Use "…"*. Files are compared with the first parent; a root commit with the empty tree. Files that no longer exist are skipped and counted.
+- Adding more than 200 files asks for confirmation first.
+- **Where:** the Workset Files "…" menu, the Command Palette, and an **Add Files from Branch** row (showing the branch) in the empty and no-active states.
+- **Source Control view:** **Add to Active Workset** on files and on the Staged/Changes/Untracked/Merge groups. Deleted files are skipped.
+- **Timeline view:** **Add Files from This Commit to Workset** on Git commits of a file.
+- **Source Control graph:**
+  - **Drag** one or more commits onto Workset Files (adds to the active workset, or creates one), onto a workset in File Worksets, or onto empty space there (creates a new workset).
+  - **Right-click** a commit → **Add Files to Workset**. This menu is a *proposed* VS Code API (`contribSourceControlHistoryItemMenu`, declared in `enabledApiProposals`): it works when running from source (F5). For an installed build, add `"enable-proposed-api": ["local.file-worksets"]` to `argv.json` (Command Palette → *Preferences: Configure Runtime Arguments*) and restart. Without it, VS Code logs a warning and simply doesn't show the entry. Extensions using proposed APIs can't be published to the Marketplace.
+  - **Files inside an expanded commit** can't be added from the graph: VS Code doesn't let extensions contribute to their context menu (not even as a proposed API), and they don't carry drag data.
+- **Created at:** new worksets record the branch and commit they were created at (`"git": { "branch", "commit" }` in storage, plus `root` in multi-root). Shown in the workset tooltip ("Created 2 hours ago on feature/login @ 1a2b3c4") and the Switch/New Workset picker. Older worksets have no record.
 
 ### Auto-add
 
@@ -170,8 +188,7 @@ VS Code doesn't let extensions reuse the Explorer's own context menu in their vi
 
 ### Automation ideas
 
-- [ ] Create a workset from the files changed on the current branch or in the working tree (Git extension API).
-- [ ] Create a workset from search results, the files in a commit or PR, or Problems.
+- [ ] Create a workset from search results, a PR, or Problems.
 - [ ] Auto-add ignore list (globs such as `**/*.lock` or generated files), or limiting auto-add to files under certain folders.
 - [ ] Suggest related files, for example a test next to its source (`foo.ts` ↔ `foo.test.ts`).
 - [ ] Optionally restore a workset's editors on switch. This would be opt-in, since switching must have no side effects by default.

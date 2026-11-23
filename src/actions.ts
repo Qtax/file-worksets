@@ -3,6 +3,7 @@ import { sep } from 'node:path';
 import * as vscode from 'vscode';
 import {
 	coveringFolder,
+	formatGitOrigin,
 	formatRelativeTime,
 	isCovered,
 	makeEntry,
@@ -99,12 +100,12 @@ export class WorksetActions {
 		return workset;
 	}
 
-	/** The active workset; if none is active, a new one is created and activated. */
-	async ensureActive(): Promise<Workset | undefined> {
+	/** The active workset; if none is active, a new one is created (with `name`, if given) and activated. */
+	async ensureActive(name = ''): Promise<Workset | undefined> {
 		if (!this.requireWorkspace()) {
 			return undefined;
 		}
-		return this.store.active ?? this.createWorkset();
+		return this.store.active ?? this.createWorkset(name);
 	}
 
 	async pickWorkset(options: { placeHolder: string; excludeId?: string; allowCreate?: boolean }): Promise<Workset | undefined> {
@@ -156,7 +157,10 @@ export class WorksetActions {
 					label: worksetLabel(w),
 					iconPath: new vscode.ThemeIcon(w.id === activeId ? 'check' : 'blank'),
 					description: `${w.id === activeId ? 'active · ' : ''}${describeWorkset(w)}`,
-					detail: `Last used ${formatRelativeTime(this.store.lastUsedTimes[w.id])}`,
+					detail: [
+						`Last used ${formatRelativeTime(this.store.lastUsedTimes[w.id])}`,
+						...(w.git ? [`created on ${formatGitOrigin(w.git)}`] : []),
+					].join(' · '),
 					buttons: [renameButton, deleteButton],
 					workset: w,
 				})),
@@ -307,7 +311,16 @@ export class WorksetActions {
 		return { entries, skipped };
 	}
 
-	async addUris(uris: readonly vscode.Uri[], target?: Workset): Promise<WorksetEntry[]> {
+	/**
+	 * Adds files and folders to `target`, or to the active workset (creating one if none is active).
+	 * `options.from` describes the source in the message (e.g. a branch), `options.newName` names a
+	 * workset created for this, and `options.notFound` counts files the caller already found missing.
+	 */
+	async addUris(
+		uris: readonly vscode.Uri[],
+		target?: Workset,
+		options: { readonly from?: string; readonly newName?: string; readonly notFound?: number } = {},
+	): Promise<WorksetEntry[]> {
 		if (uris.length === 0) {
 			void vscode.window.showInformationMessage('File Worksets: Nothing to add. Select a file in the Explorer or open an editor.');
 			return [];
@@ -318,12 +331,12 @@ export class WorksetActions {
 			this.reportSkipped(skipped);
 			return [];
 		}
-		let workset = target ?? (await this.ensureActive());
+		let workset = target ?? (await this.ensureActive(options.newName));
 		if (!workset) {
 			return [];
 		}
 		let added = this.store.addEntries(workset.id, entries);
-		this.reportAdded(workset, added.length, entries.length - added.length, skipped);
+		this.reportAdded(workset, added.length, entries.length - added.length, skipped, options);
 		return added;
 	}
 
@@ -741,23 +754,31 @@ export class WorksetActions {
 		}
 	}
 
-	private reportAdded(workset: Workset, added: number, existing: number, skipped: number): void {
+	private reportAdded(
+		workset: Workset,
+		added: number,
+		existing: number,
+		skipped: number,
+		options: { readonly from?: string; readonly notFound?: number } = {},
+	): void {
 		this.reportSkipped(skipped);
 		if (!this.store.changeable) {
 			// The store already explained why nothing was added.
 			return;
 		}
+		let notFound = options.notFound ? ` ${plural(options.notFound, 'file')} no longer exist${options.notFound === 1 ? 's' : ''}.` : '';
 		if (!added) {
 			if (existing) {
 				this.reportAlreadyIn(workset);
 			}
 			return;
 		}
-		let message = `$(check) Added ${plural(added, 'item')} to "${worksetLabel(workset)}".`;
+		let from = options.from ? ` from ${options.from}` : '';
+		let message = `$(check) Added ${plural(added, 'item')}${from} to "${worksetLabel(workset)}".`;
 		if (existing) {
 			message += ` ${plural(existing, 'item')} already in the workset.`;
 		}
-		vscode.window.setStatusBarMessage(message, 4000);
+		vscode.window.setStatusBarMessage(message + notFound, 5000);
 	}
 }
 

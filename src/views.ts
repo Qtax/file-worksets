@@ -1,6 +1,15 @@
 import * as vscode from 'vscode';
 import { describeWorkset, sortedWorksets, type WorksetActions } from './actions.ts';
-import { formatRelativeTime, sameRoot, sanitizeEntries, worksetLabel, type WorksetEntry } from './core/model.ts';
+import { HISTORY_ITEM_MIME, HISTORY_ITEM_SCHEME, parseHistoryItemDrag, parseHistoryItemUri, type HistoryItemRef } from './core/git.ts';
+import {
+	formatGitOrigin,
+	formatRelativeTime,
+	sameRoot,
+	sanitizeEntries,
+	worksetLabel,
+	type Workset,
+	type WorksetEntry,
+} from './core/model.ts';
 import { isSameOrUnder } from './core/paths.ts';
 import { isFileNode, nodeId, type FileNode, type FileTreeService, type TreeNode, type WorksetNode } from './fileTree.ts';
 import type { Location, WorkspaceRoots } from './roots.ts';
@@ -14,6 +23,10 @@ export const LIST_VIEW_ID = 'fileWorksets.list';
  */
 export const ENTRIES_MIME = 'application/vnd.file-worksets.entries+json';
 const URI_LIST = 'text/uri-list';
+
+function escapeMarkdown(text: string): string {
+	return text.replace(/[\\`*_{}[\]()#+\-.!|<>]/g, '\\$&');
+}
 
 /**
  * Sets a context key once a view has delivered its first items. Empty-view messages wait for it:
@@ -80,6 +93,35 @@ async function urisFrom(dataTransfer: vscode.DataTransfer): Promise<vscode.Uri[]
 }
 
 /**
+ * Commits dragged from the Source Control graph: its own payload, or its commit URIs in the URI list.
+ * Those URIs are removed from `uris`, since they aren't files.
+ */
+async function commitsFrom(dataTransfer: vscode.DataTransfer, uris: vscode.Uri[]): Promise<HistoryItemRef[]> {
+	let fromGraph = commitUris(uris);
+	let text = await dataTransfer.get(HISTORY_ITEM_MIME)?.asString();
+	let payload = text ? parseHistoryItemDrag(text) : [];
+	return payload.length ? payload : fromGraph;
+}
+
+function commitUris(uris: vscode.Uri[]): HistoryItemRef[] {
+	let refs: HistoryItemRef[] = [];
+	for (let index = uris.length - 1; index >= 0; index--) {
+		let uri = uris[index]!;
+		if (uri.scheme === HISTORY_ITEM_SCHEME) {
+			let ref = parseHistoryItemUri(uri.path, uri.query);
+			if (ref) {
+				refs.unshift(ref);
+			}
+			uris.splice(index, 1);
+		}
+	}
+	return refs;
+}
+
+/** Adds dragged commits' files to a workset (the active one if undefined); set when Git is available. */
+export type CommitDropHandler = (commits: readonly HistoryItemRef[], target?: Workset) => Promise<void>;
+
+/**
  * A row shown when no workset is active or it's empty. Welcome content and `TreeView.message` aren't
  * drop targets (welcome content even hides the tree), so the hint and its buttons are tree rows instead.
  */
@@ -117,7 +159,7 @@ const EMPTY_ACTIONS: readonly ActionNode[] = [
 
 /** "Workset Files": the files of the active workset, grouped by folder like the Explorer. */
 export class ActiveFilesProvider implements vscode.TreeDataProvider<ActiveNode>, vscode.TreeDragAndDropController<ActiveNode> {
-	readonly dropMimeTypes = [ENTRIES_MIME, URI_LIST];
+	readonly dropMimeTypes = [ENTRIES_MIME, URI_LIST, HISTORY_ITEM_MIME];
 	readonly dragMimeTypes = [ENTRIES_MIME, URI_LIST];
 	private readonly emitter = new vscode.EventEmitter<void>();
 	readonly onDidChangeTreeData = this.emitter.event;
@@ -127,6 +169,9 @@ export class ActiveFilesProvider implements vscode.TreeDataProvider<ActiveNode>,
 	private readonly roots: WorkspaceRoots;
 	private readonly parents = new Map<string, FileNode | undefined>();
 	private loaded = false;
+	/** Current Git branch, for the "Add Files from Branch" row; undefined without a repository. */
+	currentBranch: (() => string | undefined) | undefined;
+	dropCommits: CommitDropHandler | undefined;
 
 	constructor(store: WorksetStore, tree: FileTreeService, actions: WorksetActions, roots: WorkspaceRoots) {
 		this.store = store;
@@ -163,6 +208,18 @@ export class ActiveFilesProvider implements vscode.TreeDataProvider<ActiveNode>,
 		let children: ActiveNode[] = await this.children(node);
 		if (!node && children.length === 0 && this.store.hasStorage) {
 			children = [...(this.store.active ? EMPTY_ACTIONS : NO_ACTIVE_ACTIONS)];
+			let branch = this.currentBranch?.();
+			if (branch) {
+				children.push({
+					kind: 'action',
+					id: 'add-branch',
+					command: 'fileWorksets.addBranchFiles',
+					label: 'Add Files from Branch',
+					description: branch,
+					tooltip: `Add the files committed on ${branch} since it left its base branch`,
+					icon: 'git-branch',
+				});
+			}
 		}
 		// Only VS Code's own requests count as "loaded"; internal lookups (auto-reveal) don't render anything.
 		if (!node && !this.loaded) {
@@ -240,6 +297,10 @@ export class ActiveFilesProvider implements vscode.TreeDataProvider<ActiveNode>,
 			return;
 		}
 		let uris = await urisFrom(dataTransfer);
+		let commits = await commitsFrom(dataTransfer, uris);
+		if (commits.length && this.dropCommits) {
+			await this.dropCommits(commits);
+		}
 		if (uris.length) {
 			await this.actions.addUris(uris);
 		}
@@ -252,7 +313,7 @@ export class ActiveFilesProvider implements vscode.TreeDataProvider<ActiveNode>,
 
 /** "File Worksets": every saved workset; expand one to browse its files. */
 export class WorksetsProvider implements vscode.TreeDataProvider<TreeNode>, vscode.TreeDragAndDropController<TreeNode> {
-	readonly dropMimeTypes = [ENTRIES_MIME, URI_LIST];
+	readonly dropMimeTypes = [ENTRIES_MIME, URI_LIST, HISTORY_ITEM_MIME];
 	readonly dragMimeTypes = [ENTRIES_MIME, URI_LIST];
 	private readonly emitter = new vscode.EventEmitter<void>();
 	readonly onDidChangeTreeData = this.emitter.event;
@@ -260,6 +321,7 @@ export class WorksetsProvider implements vscode.TreeDataProvider<TreeNode>, vsco
 	private readonly tree: FileTreeService;
 	private readonly actions: WorksetActions;
 	private loaded = false;
+	dropCommits: CommitDropHandler | undefined;
 
 	constructor(store: WorksetStore, tree: FileTreeService, actions: WorksetActions) {
 		this.store = store;
@@ -288,9 +350,13 @@ export class WorksetsProvider implements vscode.TreeDataProvider<TreeNode>, vsco
 		item.contextValue = isActive ? 'workset.active' : 'workset';
 		if (workset) {
 			let tooltip = new vscode.MarkdownString();
-			tooltip.appendMarkdown(`**${name.replace(/[\\`*_{}[\]()#+\-.!|<>]/g, '\\$&')}**${isActive ? ' (active)' : ''}\n\n`);
+			tooltip.appendMarkdown(`**${escapeMarkdown(name)}**${isActive ? ' (active)' : ''}\n\n`);
 			tooltip.appendMarkdown(`${describeWorkset(workset)}  \n`);
-			tooltip.appendMarkdown(`Created ${formatRelativeTime(workset.createdAt)}  \n`);
+			tooltip.appendMarkdown(`Created ${formatRelativeTime(workset.createdAt)}`);
+			if (workset.git) {
+				tooltip.appendMarkdown(` on ${escapeMarkdown(formatGitOrigin(workset.git))}`);
+			}
+			tooltip.appendMarkdown('  \n');
 			tooltip.appendMarkdown(`Last used ${formatRelativeTime(this.store.lastUsedTimes[workset.id])}`);
 			item.tooltip = tooltip;
 		}
@@ -326,7 +392,8 @@ export class WorksetsProvider implements vscode.TreeDataProvider<TreeNode>, vsco
 			return;
 		}
 		let uris = payload ? [] : await urisFrom(dataTransfer);
-		if (!payload?.entries.length && !uris.length) {
+		let commits = payload || !this.dropCommits ? [] : await commitsFrom(dataTransfer, uris);
+		if (!payload?.entries.length && !uris.length && !commits.length) {
 			return;
 		}
 		// Dropping on empty space creates a new workset from the dropped items.
@@ -334,9 +401,12 @@ export class WorksetsProvider implements vscode.TreeDataProvider<TreeNode>, vsco
 		if (!workset) {
 			return;
 		}
+		if (commits.length) {
+			await this.dropCommits?.(commits, workset);
+		}
 		if (payload) {
 			this.actions.addEntriesTo(workset, payload.entries);
-		} else {
+		} else if (uris.length) {
 			await this.actions.addUris(uris, workset);
 		}
 	}

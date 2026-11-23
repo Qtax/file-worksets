@@ -6,6 +6,7 @@ A focused, Explorer-like sidebar for the files that matter to the task at hand. 
 - **File Worksets** view: all saved worksets. Click one to activate it, or expand it to browse its files.
 - **Switch/New Workset…** quick pick (also from the status bar) for keyboard navigation.
 - Add files or whole folders from the Explorer context menu, the editor tab menu, drag and drop, or the Workset Files toolbar.
+- Add the files committed on the current Git branch, or changed in a commit, and from the Source Control view. Each workset records the branch and commit it was created at.
 - Files you edit are added to the active workset automatically. You can switch this to opened files or turn it off with `fileWorksets.autoAdd` or the toggle in the Workset Files title bar.
 
 See [FEATURES.md](FEATURES.md) for the full feature list and what's planned next.

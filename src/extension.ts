@@ -3,6 +3,8 @@ import { asFileNodes, tabUri, WorksetActions } from './actions.ts';
 import { AUTO_ADD_MODES, AutoAdder, isAutoAddMode, readAutoAddMode, type AutoAddMode } from './autoAdd.ts';
 import { ActiveEditorRevealer } from './autoReveal.ts';
 import { DeletionTracker } from './deletions.ts';
+import { GitService } from './git.ts';
+import { GitActions } from './gitActions.ts';
 import { WorksetFileDecorations } from './decorations.ts';
 import { touchIndex, worksetLabel, type SortOrder } from './core/model.ts';
 import { FileTreeService, isFileNode, isWorksetNode, MissingFileDecorations, type FileNode, type TreeNode } from './fileTree.ts';
@@ -23,6 +25,7 @@ export interface FileWorksetsApi {
 	readonly listView: vscode.TreeView<TreeNode>;
 	readonly revealer: ActiveEditorRevealer;
 	readonly decorations: WorksetFileDecorations;
+	readonly git: GitService;
 }
 
 function createBackend(context: vscode.ExtensionContext, roots: WorkspaceRoots): StorageBackend | undefined {
@@ -90,7 +93,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<FileWo
 	let activeFiles = new ActiveFilesProvider(store, tree, actions, roots);
 	let worksets = new WorksetsProvider(store, tree, actions);
 	let deletions = new DeletionTracker(store, roots, context.workspaceState);
-	context.subscriptions.push(store, activeFiles, worksets, new AutoAdder(store, roots), deletions);
+	let git = new GitService(context.workspaceState);
+	let gitActions = new GitActions(git, actions, store);
+	store.gitOrigin = () => git.origin((uri) => vscode.workspace.getWorkspaceFolder(uri)?.name);
+	activeFiles.currentBranch = () => git.currentBranch();
+	activeFiles.dropCommits = (commits, target) => gitActions.addCommits(commits, target);
+	worksets.dropCommits = (commits, target) => gitActions.addCommits(commits, target);
+	context.subscriptions.push(store, activeFiles, worksets, new AutoAdder(store, roots), deletions, git);
+	// The empty-state rows show the current branch.
+	context.subscriptions.push(git.onDidChange(() => activeFiles.refresh()));
 
 	let activeView = vscode.window.createTreeView(ACTIVE_VIEW_ID, {
 		treeDataProvider: activeFiles,
@@ -332,6 +343,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<FileWo
 		}
 	});
 	register('fileWorksets.addActiveEditor', () => actions.addUris(urisFromArgs(undefined, undefined)));
+	register('fileWorksets.addBranchFiles', () => gitActions.addBranchFiles());
+	// From code or tests: a ref string; from the Timeline: (item, uri).
+	register('fileWorksets.addCommitFiles', (ref?: unknown, uri?: unknown) => gitActions.addCommitFiles(ref, uri));
+	register('fileWorksets.addTimelineCommit', (item?: unknown, uri?: unknown) => gitActions.addCommitFiles(item, uri));
+	register('fileWorksets.addHistoryItems', (...args: unknown[]) => gitActions.addHistoryItems(...args));
+	register('fileWorksets.addScmResources', (...args: unknown[]) => gitActions.addScmResources(...args));
 	register('fileWorksets.addOpenEditors', () => {
 		let uris = new Map<string, vscode.Uri>();
 		for (let group of vscode.window.tabGroups.all) {
@@ -488,8 +505,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<FileWo
 	pinRootlessEntries();
 	updateChrome();
 	void deletions.reconcile();
+	// Connects to the Git extension in the background; Git commands wait for it themselves.
+	void git.whenReady();
 
-	return { store, actions, activeFiles, worksets, activeView, listView, revealer, decorations };
+	return { store, actions, activeFiles, worksets, activeView, listView, revealer, decorations, git };
 }
 
 export function deactivate(): void {}

@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { compileExcludes, globToRegExp } from '../../src/core/glob.ts';
+import { branchWorksetName, changedFiles, commitFromArg, commitPickerMatches, detectBaseBranch, historyItemCommits, parseHistoryItemDrag, parseHistoryItemUri } from '../../src/core/git.ts';
 import {
 	addEntries,
+	formatGitOrigin,
 	formatRelativeTime,
 	parseWorksets,
 	removeUnder,
@@ -151,6 +153,16 @@ describe('model', () => {
 		assert.deepEqual(parseWorksets(text, () => 'x', { backslashIsSeparator: false })[0]?.entries, [file('dir\\a.ts')]);
 	});
 
+	test('the Git origin round-trips, and malformed values are dropped', () => {
+		let git = { branch: 'feature/login', commit: '1a2b3c4d5e6f' };
+		let workset: Workset = { id: 'a', name: 'A', createdAt: '2026-01-01T00:00:00.000Z', entries: [], git };
+		assert.deepEqual(parseWorksets(serializeWorksets([workset]), () => 'x')[0]?.git, git);
+		let bad = JSON.stringify({ worksets: [{ id: 'a', git: { branch: 'x', commit: 'not a hash' } }, { id: 'b', git: 'main' }] });
+		assert.deepEqual(parseWorksets(bad, () => 'x').map((w) => w.git), [undefined, undefined]);
+		assert.equal(formatGitOrigin(git), 'feature/login @ 1a2b3c4');
+		assert.equal(formatGitOrigin({ commit: '1a2b3c4d5e6f' }), '1a2b3c4', 'detached HEAD has no branch');
+	});
+
 	test('sanitizeEntries validates drag-and-drop payloads', () => {
 		assert.deepEqual(
 			sanitizeEntries([
@@ -259,6 +271,68 @@ describe('tree', () => {
 			listChildren(chains, true).map((c) => c.label),
 			['a', 'a-b', 'b/only'],
 		);
+	});
+});
+
+describe('git', () => {
+	test('changedFiles drops deletions and follows renames', () => {
+		let changes = [
+			{ uri: 'a.ts', status: 5 }, // MODIFIED
+			{ uri: 'b.ts', status: 1 }, // INDEX_ADDED
+			{ uri: 'gone.ts', status: 6 }, // DELETED
+			{ uri: 'staged-gone.ts', status: 2 }, // INDEX_DELETED
+			{ uri: 'old.ts', renameUri: 'new.ts', status: 3 }, // INDEX_RENAMED
+		];
+		assert.deepEqual(changedFiles(changes), ['a.ts', 'b.ts', 'new.ts']);
+	});
+
+	test('detectBaseBranch prefers the remote default and never picks the current branch', () => {
+		assert.equal(detectBaseBranch(['main', 'origin/main', 'origin/HEAD', 'feature'], 'feature'), 'origin/HEAD');
+		assert.equal(detectBaseBranch(['main', 'master', 'feature'], 'feature'), 'main');
+		assert.equal(detectBaseBranch(['main', 'develop'], 'main'), 'develop');
+		assert.equal(detectBaseBranch(['feature', 'other'], 'feature'), undefined);
+	});
+
+	test('branchWorksetName uses the branch unless the name is taken (ignoring case)', () => {
+		assert.equal(branchWorksetName('feature/login', ['Other']), 'feature/login');
+		assert.equal(branchWorksetName('feature/login', ['Feature/Login']), '');
+	});
+
+	test('commitFromArg accepts refs and Timeline-like items', () => {
+		assert.equal(commitFromArg(' HEAD~1 '), 'HEAD~1');
+		assert.equal(commitFromArg({ ref: '1a2b3c4d', id: 'x' }), '1a2b3c4d');
+		assert.equal(commitFromArg({ id: '1a2b3c4d5e' }), '1a2b3c4d5e');
+		assert.equal(commitFromArg({ id: 'working' }), undefined);
+		assert.equal(commitFromArg(undefined), undefined);
+	});
+
+	test('commit picker: pasted hashes find listed commits, other ref-like text offers "Use"', () => {
+		let hashes = ['1a2b3c4d5e6f7081', 'ffff000011112222'];
+		assert.deepEqual(commitPickerMatches(' 1A2B3C4D5E6F7081 ', hashes), { hashMatches: ['1a2b3c4d5e6f7081'], offerRef: false });
+		assert.deepEqual(commitPickerMatches('1a2b', hashes), { hashMatches: ['1a2b3c4d5e6f7081'], offerRef: false });
+		assert.deepEqual(commitPickerMatches('abcdef1234567890', hashes), { hashMatches: [], offerRef: true }, 'not in the list');
+		assert.deepEqual(commitPickerMatches('v1.2.0', hashes), { hashMatches: [], offerRef: true });
+		assert.deepEqual(commitPickerMatches('fix login', hashes), { hashMatches: [], offerRef: false }, 'searching messages');
+		assert.deepEqual(commitPickerMatches('', hashes), { hashMatches: [], offerRef: false });
+	});
+
+	test('Source Control graph: drag payloads, commit URIs and menu arguments', () => {
+		let drag = JSON.stringify([
+			{ name: 'repo 1a2b3c4', resource: { scheme: 'scm-history-item', path: 'c:\\repo' }, historyItem: { id: '1a2b3c4d5e', parentIds: [] } },
+			{ historyItem: { id: 'not-a-hash' } },
+		]);
+		assert.deepEqual(parseHistoryItemDrag(drag), [{ commit: '1a2b3c4d5e', rootPath: 'c:\\repo' }]);
+		assert.deepEqual(parseHistoryItemDrag('nope'), []);
+		assert.deepEqual(parseHistoryItemUri('/repo', JSON.stringify({ repositoryId: '1', historyItemId: 'abcdef12' })), {
+			commit: 'abcdef12',
+			rootPath: '/repo',
+		});
+		assert.equal(parseHistoryItemUri('/repo', '{'), undefined);
+		let item = { id: 'abcdef12', parentIds: ['0000000'] };
+		assert.deepEqual(historyItemCommits([{ rootUri: {} }, item, [item, { id: 'fedcba98', parentIds: [] }], { id: 'abcdef12' }]), [
+			'abcdef12',
+			'fedcba98',
+		]);
 	});
 });
 
